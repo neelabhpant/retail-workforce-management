@@ -1,0 +1,70 @@
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=False
+      - DATABASE_PATH=/app/data/retail_workforce.db
+      - CORS_ORIGINS=["http://localhost:3000", "http://frontend:3000"]
+    volumes:
+      - backend_data:/app/data
+      - ./backend/.env:/app/.env
+    networks:
+      - retail_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend React Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - NODE_ENV=production
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - retail_network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy (Optional)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - retail_network
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  backend_data:
+    driver: local
+
+networks:
+  retail_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

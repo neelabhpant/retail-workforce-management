@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Agent Updates Test</h1>
+    <button onclick="connect()">Connect to WebSocket</button>
+    <button onclick="testOptimization()">Test CrewAI Optimization</button>
+    <div id="status">Disconnected</div>
+    <div id="messages" style="border: 1px solid #ccc; height: 400px; overflow-y: scroll; margin-top: 20px; padding: 10px;"></div>
+
+    <script>
+        let ws = null;
+
+        function connect() {
+            ws = new WebSocket('ws://localhost:8000/ws');
+            
+            ws.onopen = () => {
+                document.getElementById('status').innerText = 'Connected';
+                addMessage('WebSocket connected');
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                addMessage(`${message.type}: ${JSON.stringify(message, null, 2)}`);
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').innerText = 'Disconnected';
+                addMessage('WebSocket disconnected');
+            };
+            
+            ws.onerror = (error) => {
+                addMessage(`Error: ${error}`);
+            };
+        }
+
+        function addMessage(msg) {
+            const messagesDiv = document.getElementById('messages');
+            const msgDiv = document.createElement('div');
+            msgDiv.style.marginBottom = '10px';
+            msgDiv.style.padding = '5px';
+            msgDiv.style.backgroundColor = '#f0f0f0';
+            msgDiv.innerHTML = `<pre>${msg}</pre>`;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        async function testOptimization() {
+            addMessage('Starting CrewAI optimization test...');
+            
+            const response = await fetch('http://localhost:8000/api/agents/optimize-schedule-crewai', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    date_range: '2024-01-01 to 2024-01-07',
+                    locations: ['store_001'],
+                    departments: ['Sales Floor', 'Customer Service'],
+                    constraints: []
+                })
+            });
+            
+            const result = await response.json();
+            addMessage(`Optimization result: ${JSON.stringify(result, null, 2)}`);
+        }
+    </script>
+</body>
+</html>

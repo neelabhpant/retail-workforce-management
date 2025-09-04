@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 font-sans;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+  }
+  
+  .btn-primary {
+    @apply bg-cdp-blue text-white px-4 py-2 rounded-md hover:bg-cdp-dark transition-colors font-medium;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-300 transition-colors font-medium;
+  }
+  
+  .status-indicator {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .status-active {
+    @apply bg-green-100 text-green-800;
+  }
+  
+  .status-processing {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+  
+  .status-idle {
+    @apply bg-gray-100 text-gray-800;
+  }
+  
+  .status-error {
+    @apply bg-red-100 text-red-800;
+  }
+  
+  .data-flow-particle {
+    @apply absolute w-2 h-2 bg-cdp-blue rounded-full animate-flow;
+  }
+  
+  .component-box {
+    @apply bg-white border-2 border-gray-200 rounded-lg p-4 relative overflow-hidden;
+  }
+  
+  .component-active {
+    @apply border-cdp-blue animate-glow;
+  }
+  
+  .component-processing {
+    @apply border-yellow-400 bg-yellow-50;
+  }
+  
+  .metrics-card {
+    @apply bg-gradient-to-r from-cdp-blue to-cdp-dark text-white p-6 rounded-lg shadow-lg;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .glass-effect {
+    @apply bg-white bg-opacity-20 backdrop-blur-sm border border-white border-opacity-30;
+  }
+  
+  /* Custom scrollbar styles */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(209 213 219) transparent;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgb(243 244 246);
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(209 213 219);
+    border-radius: 3px;
+  }
+}
