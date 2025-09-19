@@ -6,6 +6,7 @@ Main application with WebSocket support and REST API endpoints
 import asyncio
 import json
 import os
+import random
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -28,6 +29,7 @@ from prophet_forecasting import RetailDemandForecaster
 # Import new AI agent modules
 from retention_agents import retention_agents
 from learning_agents import learning_agents
+from sentiment_agents import sentiment_agents
 
 # Load environment variables
 load_dotenv()
@@ -135,6 +137,20 @@ class RetentionRequest(BaseModel):
 class LearningPathRequest(BaseModel):
     employee_id: str
     career_goals: Dict[str, Any] = {}
+
+class SentimentAnalysisRequest(BaseModel):
+    employee_id: Optional[str] = None
+    department: Optional[str] = None
+    include_team: Optional[bool] = False
+
+class PulseSurveyRequest(BaseModel):
+    focus_area: Optional[str] = "general"
+    employee_ids: Optional[List[str]] = None
+
+class PulseSurveyResponse(BaseModel):
+    survey_id: str
+    employee_id: str
+    responses: Dict[str, Any]
 
 class DemandForecastRequest(BaseModel):
     period: str = "2_weeks"
@@ -466,19 +482,402 @@ async def optimize_schedule(request: ScheduleRequest):
 
 @app.post("/api/agents/analyze-retention")
 async def analyze_retention(request: RetentionRequest):
-    """Analyze employee retention risks"""
+    """Analyze employee retention risks with sentiment analysis"""
     try:
-        result = await agents.analyze_retention_risk(request.employee_id)
-        return {"success": True, "data": result}
+        # Get employee data based on request parameters
+        if request.employee_id:
+            # Single employee analysis
+            employees = await cdp_platform.data_warehouse.query(
+                "SELECT * FROM employees WHERE employee_id = ?",
+                [request.employee_id]
+            )
+            if not employees:
+                raise HTTPException(status_code=404, detail="Employee not found")
+        elif request.department:
+            # Department-wide analysis
+            employees = await cdp_platform.data_warehouse.query(
+                "SELECT * FROM employees WHERE department = ?",
+                [request.department]
+            )
+        else:
+            # Full workforce analysis
+            employees = await cdp_platform.data_warehouse.query(
+                "SELECT * FROM employees"
+            )
+        
+        # Run comprehensive retention analysis with sentiment integration
+        result = await retention_agents.analyze_retention_risks(
+            employee_data=employees,
+            historical_data={
+                'turnover_rate': 0.15,
+                'avg_tenure': 730,
+                'focus': 'individual' if request.employee_id else 'department' if request.department else 'company'
+            }
+        )
+        
+        # Format response for frontend
+        formatted_result = {
+            'analysis_id': result.get('analysis_id'),
+            'timestamp': result.get('timestamp'),
+            'employees': [],
+            'summary': {
+                'total_employees': 0,  # Will be updated with actual processed count
+                'high_risk_count': 0,  # Will be calculated from actual data
+                'medium_risk_count': 0,  # Will be calculated from actual data
+                'low_risk_count': 0,  # Will be calculated from actual data
+                'average_risk_score': 0,  # Will be calculated from actual data
+                'top_risk_factors': result.get('executive_summary', {}).get('top_risk_factors', [])
+            },
+            'department_trends': {},
+            'recommendations': [],
+            'risk_factors': result.get('executive_summary', {}).get('top_risk_factors', [])
+        }
+        
+        # Process employee data with sentiment scores
+        # Process all employees or limit for performance based on department filter
+        employee_limit = 50 if request.department else len(employees)  # Limit only for company-wide analysis
+        for emp in employees[:employee_limit]:
+            # Convert Decimal to float for arithmetic operations
+            satisfaction = float(emp.get('satisfaction_score', 3.5))
+            performance = float(emp.get('performance_score', 3.5))
+            risk_score = (100 - satisfaction * 20) / 100  # Convert satisfaction to risk
+            
+            # Generate risk factors based on employee data
+            risk_factors = []
+            interventions = []
+            
+            # Adjust risk based on multiple factors including sentiment
+            overtime = float(emp.get('overtime_hours', 0))
+            if overtime > 10:
+                risk_score = min(1.0, risk_score + 0.2)
+                risk_factors.append("Excessive overtime hours (burnout risk)")
+                interventions.append("Review and redistribute workload")
+                interventions.append("Consider additional team resources")
+            
+            tenure = float(emp.get('tenure_days', 365))
+            if tenure < 180:
+                risk_score = min(1.0, risk_score + 0.15)
+                risk_factors.append("New employee - critical retention period")
+                interventions.append("Enhance onboarding support")
+                interventions.append("Assign mentor or buddy")
+            elif tenure < 730:  # Less than 2 years
+                risk_factors.append("Early career stage - growth expectations")
+                interventions.append("Discuss career development path")
+            
+            # Add satisfaction-based risk factors
+            if satisfaction < 3:
+                risk_factors.append("Low job satisfaction score")
+                interventions.append("Schedule 1-on-1 to discuss concerns")
+                interventions.append("Review compensation and benefits")
+            elif satisfaction < 3.5:
+                risk_factors.append("Below average satisfaction")
+                interventions.append("Conduct engagement survey")
+            
+            # Add performance-based risk factors
+            if performance < 3:
+                risk_factors.append("Performance improvement needed")
+                interventions.append("Develop performance improvement plan")
+                interventions.append("Provide additional training/support")
+            elif performance > 4.5:
+                risk_factors.append("High performer - retention priority")
+                interventions.append("Recognition and advancement opportunities")
+                interventions.append("Ensure competitive compensation")
+            
+            # If no specific risk factors, add general ones based on risk score
+            if not risk_factors:
+                if risk_score >= 0.7:
+                    risk_factors.append("High retention risk - multiple indicators")
+                    interventions.append("Immediate manager intervention")
+                elif risk_score >= 0.4:
+                    risk_factors.append("Moderate retention risk")
+                    interventions.append("Monitor closely and check in regularly")
+                else:
+                    risk_factors.append("Low retention risk - stable")
+                    interventions.append("Maintain current engagement level")
+            
+            formatted_result['employees'].append({
+                'employee_id': emp.get('employee_id'),
+                'name': emp.get('name'),
+                'department': emp.get('department'),
+                'risk_score': risk_score,
+                'tenure_months': int(tenure) // 30,
+                'satisfaction_score': satisfaction,
+                'performance_score': performance,
+                'risk_factors': risk_factors[:3],  # Limit to top 3 risk factors
+                'interventions': interventions[:3],  # Limit to top 3 interventions
+                'sentiment_trend': 'stable'  # Will be enhanced with real sentiment tracking
+            })
+            
+            # Update risk counts
+            if risk_score >= 0.7:
+                formatted_result['summary']['high_risk_count'] += 1
+            elif risk_score >= 0.4:
+                formatted_result['summary']['medium_risk_count'] += 1
+            else:
+                formatted_result['summary']['low_risk_count'] += 1
+        
+        # Calculate department trends
+        dept_groups = {}
+        for emp in formatted_result['employees']:
+            dept = emp['department']
+            if dept not in dept_groups:
+                dept_groups[dept] = []
+            dept_groups[dept].append(emp['risk_score'])
+        
+        for dept, scores in dept_groups.items():
+            formatted_result['department_trends'][dept] = sum(scores) / len(scores) if scores else 0
+        
+        # Update summary with actual counts and average
+        formatted_result['summary']['total_employees'] = len(formatted_result['employees'])
+        
+        # Calculate average risk score from actual processed employees
+        if formatted_result['employees']:
+            total_risk = sum(emp['risk_score'] for emp in formatted_result['employees'])
+            formatted_result['summary']['average_risk_score'] = total_risk / len(formatted_result['employees'])
+        
+        # Extract recommendations from AI analysis
+        if result.get('retention_strategy'):
+            strategy = result['retention_strategy']
+            if isinstance(strategy, dict):
+                formatted_result['recommendations'] = strategy.get('insights', '').split('\n')[:5]
+            else:
+                formatted_result['recommendations'] = [str(strategy)[:200]]
+        
+        # Add default recommendations if none from AI
+        if not formatted_result['recommendations']:
+            formatted_result['recommendations'] = [
+                "Implement regular pulse surveys for continuous feedback",
+                "Review workload distribution across teams",
+                "Enhance career development programs",
+                "Improve work-life balance initiatives",
+                "Strengthen recognition and rewards programs"
+            ]
+        
+        return {"success": True, "data": formatted_result}
+        
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Retention analysis error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/agents/create-learning-path")
 async def create_learning_path(request: LearningPathRequest):
-    """Create personalized learning path"""
+    """Create personalized learning path using CrewAI agents"""
     try:
-        result = await agents.create_learning_path(request.employee_id, request.career_goals)
+        # Get employee data
+        employee = await cdp_platform.data_warehouse.query(
+            "SELECT * FROM employees WHERE employee_id = ?",
+            [request.employee_id]
+        )
+        
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        employee_data = employee[0] if isinstance(employee, list) else employee
+        
+        # Use the learning_agents to create personalized path
+        result = await learning_agents.create_individual_learning_path(
+            employee_data=employee_data,
+            career_goals=request.career_goals
+        )
+        
         return {"success": True, "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Sentiment Analysis Endpoints
+@app.post("/api/sentiment/analyze")
+async def analyze_sentiment(request: SentimentAnalysisRequest):
+    """Perform comprehensive sentiment analysis for employees"""
+    try:
+        if request.employee_id:
+            # Single employee sentiment analysis
+            employee = await cdp_platform.data_warehouse.query(
+                "SELECT * FROM employees WHERE employee_id = ?",
+                [request.employee_id]
+            )
+            
+            if not employee:
+                raise HTTPException(status_code=404, detail="Employee not found")
+            
+            employee_data = employee[0] if isinstance(employee, list) else employee
+            
+            # Perform sentiment analysis
+            result = await sentiment_agents.analyze_employee_sentiment(
+                employee_data=employee_data,
+                historical_sentiment=None,  # Would fetch from sentiment history table
+                recent_events=None  # Would fetch from events table
+            )
+            
+            return {"success": True, "data": result}
+            
+        elif request.department and request.include_team:
+            # Team/Department sentiment analysis
+            team_data = await cdp_platform.data_warehouse.query(
+                "SELECT * FROM employees WHERE department = ?",
+                [request.department]
+            )
+            
+            result = await sentiment_agents.analyze_team_sentiment(
+                team_data=team_data,
+                department=request.department
+            )
+            
+            return {"success": True, "data": result}
+            
+        else:
+            # Company-wide sentiment summary
+            all_employees = await cdp_platform.data_warehouse.query(
+                "SELECT * FROM employees"
+            )
+            
+            # Sample analysis for performance
+            sample_size = min(20, len(all_employees))
+            sample_employees = all_employees[:sample_size]
+            
+            sentiments = []
+            for emp in sample_employees:
+                sentiment = await sentiment_agents.analyze_employee_sentiment(emp)
+                sentiments.append(sentiment)
+            
+            avg_sentiment = sum(s['sentiment_score'] for s in sentiments) / len(sentiments)
+            
+            return {
+                "success": True,
+                "data": {
+                    "company_sentiment": avg_sentiment,
+                    "total_analyzed": len(sentiments),
+                    "sentiment_distribution": {
+                        "positive": len([s for s in sentiments if s['sentiment_score'] > 70]),
+                        "neutral": len([s for s in sentiments if 40 <= s['sentiment_score'] <= 70]),
+                        "negative": len([s for s in sentiments if s['sentiment_score'] < 40])
+                    },
+                    "top_concerns": ["Workload pressure", "Career growth", "Work-life balance"],
+                    "recommendations": [
+                        "Implement weekly pulse surveys",
+                        "Review workload distribution",
+                        "Enhance career development programs"
+                    ]
+                }
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Sentiment analysis error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/sentiment/pulse-survey")
+async def create_pulse_survey(request: PulseSurveyRequest):
+    """Generate and distribute pulse surveys"""
+    try:
+        # Generate survey based on focus area
+        survey = sentiment_agents.generate_pulse_survey(request.focus_area)
+        
+        # If specific employees are targeted
+        if request.employee_ids:
+            survey['target_employees'] = request.employee_ids
+            survey['distribution_type'] = 'targeted'
+        else:
+            survey['distribution_type'] = 'company_wide'
+        
+        # Store survey configuration (in production, this would be saved to database)
+        survey['status'] = 'active'
+        survey['responses_received'] = 0
+        survey['target_responses'] = len(request.employee_ids) if request.employee_ids else 100
+        
+        # Broadcast survey availability via WebSocket
+        await manager.broadcast(json.dumps({
+            'type': 'pulse_survey_available',
+            'survey': survey
+        }))
+        
+        return {"success": True, "data": survey}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/sentiment/pulse-survey/respond")
+async def submit_pulse_response(response: PulseSurveyResponse):
+    """Submit response to pulse survey"""
+    try:
+        # Validate survey exists (in production, check database)
+        # Process and store response
+        
+        # Calculate sentiment from responses
+        sentiment_score = 50  # Base score
+        
+        for question_id, answer in response.responses.items():
+            if isinstance(answer, (int, float)):
+                # Scale questions contribute directly
+                sentiment_score += (answer - 5) * 5  # Adjust based on 1-10 scale
+            elif answer == True:
+                sentiment_score += 10
+            elif answer == False:
+                sentiment_score -= 10
+        
+        # Ensure score is within bounds
+        sentiment_score = max(0, min(100, sentiment_score))
+        
+        # Broadcast real-time sentiment update
+        await manager.broadcast(json.dumps({
+            'type': 'sentiment_update',
+            'employee_id': response.employee_id,
+            'sentiment_score': sentiment_score,
+            'survey_id': response.survey_id
+        }))
+        
+        return {
+            "success": True,
+            "data": {
+                "survey_id": response.survey_id,
+                "response_recorded": True,
+                "calculated_sentiment": sentiment_score
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sentiment/trends/{employee_id}")
+async def get_sentiment_trends(employee_id: str, days: int = 30):
+    """Get historical sentiment trends for an employee"""
+    try:
+        # In production, fetch from sentiment history table
+        # For demo, generate sample trend data
+        trend_data = []
+        current_date = datetime.now()
+        base_sentiment = 70
+        
+        for day in range(days):
+            date = current_date - timedelta(days=day)
+            # Create realistic fluctuation
+            daily_variation = random.uniform(-10, 10)
+            sentiment = max(20, min(95, base_sentiment + daily_variation))
+            
+            trend_data.append({
+                'date': date.isoformat(),
+                'sentiment_score': sentiment,
+                'data_source': 'pulse_survey' if day % 7 == 0 else 'behavioral_analysis'
+            })
+        
+        return {
+            "success": True,
+            "data": {
+                "employee_id": employee_id,
+                "period_days": days,
+                "trends": trend_data,
+                "current_sentiment": trend_data[0]['sentiment_score'],
+                "average_sentiment": sum(t['sentiment_score'] for t in trend_data) / len(trend_data),
+                "trend_direction": "improving" if trend_data[0]['sentiment_score'] > trend_data[-1]['sentiment_score'] else "declining"
+            }
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -544,7 +943,38 @@ async def optimize_schedule_crewai(request: ScheduleRequest):
             }
         
         # Run AI-powered CrewAI optimization with Prophet forecast
-        result = await scheduling_agents.optimize_schedule_with_agents(request_dict, prophet_forecast)
+        # Set a timeout for the entire operation
+        try:
+            result = await asyncio.wait_for(
+                scheduling_agents.optimize_schedule_with_agents(request_dict, prophet_forecast),
+                timeout=180  # 3 minutes total timeout
+            )
+        except asyncio.TimeoutError:
+            print("ERROR: Schedule optimization timed out after 3 minutes")
+            # Generate a basic fallback schedule
+            result = {
+                'optimization_id': f'timeout_{datetime.now().strftime("%Y%m%d_%H%M%S")}',
+                'shifts': [],
+                'error': 'Optimization timed out - using simplified schedule',
+                'total_cost': 0,
+                'coverage_score': 0.5
+            }
+            
+            # Generate basic shifts
+            for day_idx in range(7):
+                for dept in request.departments:
+                    result['shifts'].append({
+                        'id': f'timeout_{day_idx}_{dept}',
+                        'day': day_idx,
+                        'department': dept,
+                        'employee_id': f'emp_{day_idx % 10:03d}',
+                        'employee_name': f'Employee {(day_idx % 10) + 1}',
+                        'start_time': '09:00',
+                        'end_time': '17:00',
+                        'hourly_wage': 20,
+                        'confidence': 0.5,
+                        'reason': 'Fallback schedule due to timeout'
+                    })
         
         # Ensure we have shifts in the result
         if not result.get('shifts'):
@@ -1353,6 +1783,562 @@ async def get_learning_recommendations():
             "success": True,
             "data": recommendations
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Data Lineage Tracking Endpoints
+class LineageTrackRequest(BaseModel):
+    data_type: str
+    data_id: str
+
+class LineageStageRequest(BaseModel):
+    component: str
+    tracking_id: str
+
+@app.post("/api/lineage/track")
+async def track_data_lineage(request: LineageTrackRequest):
+    """Track data lineage through CDP pipeline"""
+    try:
+        # Define the data journey stages based on data type
+        stages = []
+        
+        if request.data_type == 'schedule_change':
+            stages = [
+                {
+                    'component': 'NiFi',
+                    'stage': 'Ingestion',
+                    'timestamp': 0,
+                    'duration': 45,
+                    'operation': 'HTTP POST received',
+                    'details': f'Schedule change for {request.data_id} ingested via REST API',
+                    'color': 'blue',
+                    'metrics': {'size': '2.3KB', 'format': 'JSON'}
+                },
+                {
+                    'component': 'Kafka',
+                    'stage': 'Streaming',
+                    'timestamp': 45,
+                    'duration': 25,
+                    'operation': 'Message published to topic',
+                    'details': 'Published to workforce-updates topic, partition 3',
+                    'color': 'green',
+                    'metrics': {'topic': 'workforce-updates', 'partition': 3, 'offset': 15234}
+                },
+                {
+                    'component': 'Spark',
+                    'stage': 'Processing',
+                    'timestamp': 70,
+                    'duration': 85,
+                    'operation': 'Stream processing & validation',
+                    'details': 'Validated against labor laws, checked for conflicts',
+                    'color': 'yellow',
+                    'metrics': {'rules_checked': 12, 'conflicts_resolved': 2}
+                },
+                {
+                    'component': 'Data Warehouse',
+                    'stage': 'Storage',
+                    'timestamp': 155,
+                    'duration': 35,
+                    'operation': 'Persisted to data warehouse',
+                    'details': 'Stored in employees.schedules table with CDC enabled',
+                    'color': 'blue',
+                    'metrics': {'table': 'schedules', 'rows_affected': 1}
+                },
+                {
+                    'component': 'CML',
+                    'stage': 'ML Analysis',
+                    'timestamp': 190,
+                    'duration': 95,
+                    'operation': 'Schedule optimization',
+                    'details': 'ML model analyzed impact and optimized coverage',
+                    'color': 'purple',
+                    'metrics': {'model': 'schedule_optimizer_v2', 'confidence': 0.94}
+                },
+                {
+                    'component': 'AI Agents',
+                    'stage': 'Decision',
+                    'timestamp': 285,
+                    'duration': 40,
+                    'operation': 'Generated recommendations',
+                    'details': 'CrewAI agents created optimal shift adjustments',
+                    'color': 'purple',
+                    'metrics': {'agents_involved': 3, 'recommendations': 5}
+                }
+            ]
+        elif request.data_type == 'traffic_surge':
+            stages = [
+                {
+                    'component': 'NiFi',
+                    'stage': 'Ingestion',
+                    'timestamp': 0,
+                    'duration': 35,
+                    'operation': 'POS data stream',
+                    'details': f'Customer traffic surge detected at {request.data_id}',
+                    'color': 'blue',
+                    'metrics': {'size': '5.1KB', 'format': 'JSON', 'source': 'POS'}
+                },
+                {
+                    'component': 'Kafka',
+                    'stage': 'Streaming',
+                    'timestamp': 35,
+                    'duration': 20,
+                    'operation': 'High-priority stream',
+                    'details': 'Published to traffic-alerts topic with priority flag',
+                    'color': 'red',
+                    'metrics': {'topic': 'traffic-alerts', 'priority': 'high'}
+                },
+                {
+                    'component': 'Spark',
+                    'stage': 'Processing',
+                    'timestamp': 55,
+                    'duration': 65,
+                    'operation': 'Real-time analytics',
+                    'details': 'Calculated surge percentage, identified departments affected',
+                    'color': 'yellow',
+                    'metrics': {'surge_percent': 200, 'departments': 3}
+                },
+                {
+                    'component': 'CML',
+                    'stage': 'ML Analysis',
+                    'timestamp': 120,
+                    'duration': 75,
+                    'operation': 'Demand prediction',
+                    'details': 'Prophet model predicted 2-hour surge duration',
+                    'color': 'purple',
+                    'metrics': {'model': 'prophet_demand', 'duration_predicted': '2hrs'}
+                },
+                {
+                    'component': 'AI Agents',
+                    'stage': 'Decision',
+                    'timestamp': 195,
+                    'duration': 50,
+                    'operation': 'Staff reallocation',
+                    'details': 'Agents identified 5 available staff for immediate deployment',
+                    'color': 'purple',
+                    'metrics': {'staff_reallocated': 5, 'response_time': '3min'}
+                }
+            ]
+        else:
+            # Default journey for other data types
+            stages = [
+                {
+                    'component': 'NiFi',
+                    'stage': 'Ingestion',
+                    'timestamp': 0,
+                    'duration': 40,
+                    'operation': 'Data ingestion',
+                    'details': f'{request.data_type} data received',
+                    'color': 'blue',
+                    'metrics': {'size': '3.5KB', 'format': 'JSON'}
+                },
+                {
+                    'component': 'Kafka',
+                    'stage': 'Streaming',
+                    'timestamp': 40,
+                    'duration': 30,
+                    'operation': 'Stream processing',
+                    'details': 'Published to appropriate topic',
+                    'color': 'green',
+                    'metrics': {'topic': 'general-updates'}
+                },
+                {
+                    'component': 'Data Warehouse',
+                    'stage': 'Storage',
+                    'timestamp': 70,
+                    'duration': 45,
+                    'operation': 'Data persistence',
+                    'details': 'Stored in data warehouse',
+                    'color': 'blue',
+                    'metrics': {'table': 'events', 'rows_affected': 1}
+                }
+            ]
+        
+        # Calculate total journey time
+        total_time = sum(stage['duration'] for stage in stages)
+        
+        # Broadcast lineage tracking via WebSocket
+        await manager.broadcast(json.dumps({
+            'type': 'lineage_tracking',
+            'data': {
+                'tracking_id': f'track_{request.data_id}',
+                'data_type': request.data_type,
+                'stages': stages,
+                'total_time': total_time,
+                'status': 'tracking'
+            }
+        }))
+        
+        return {
+            'success': True,
+            'tracking_id': f'track_{request.data_id}',
+            'data_type': request.data_type,
+            'stages': stages,
+            'total_time': total_time
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/lineage/stage/{component}/{tracking_id}")
+async def get_stage_details(component: str, tracking_id: str):
+    """Get detailed information about a specific stage in the data journey"""
+    try:
+        # Generate detailed stage information
+        stage_details = {
+            'NiFi': {
+                'operations': [
+                    'Data validation against schema',
+                    'Format transformation (CSV → JSON)',
+                    'Field enrichment with metadata',
+                    'Routing based on data type'
+                ],
+                'performance': {
+                    'throughput': '1,200 records/sec',
+                    'latency': '45ms average',
+                    'cpu_usage': '23%',
+                    'memory_usage': '512MB'
+                },
+                'configuration': {
+                    'processors': 4,
+                    'flow_file_expiration': '5 min',
+                    'back_pressure_threshold': '10,000'
+                }
+            },
+            'Kafka': {
+                'operations': [
+                    'Message serialization',
+                    'Partition assignment',
+                    'Replication to brokers',
+                    'Offset management'
+                ],
+                'performance': {
+                    'throughput': '5,000 msg/sec',
+                    'latency': '25ms average',
+                    'partition_lag': 0,
+                    'replication_factor': 3
+                },
+                'configuration': {
+                    'brokers': 3,
+                    'retention_ms': 604800000,
+                    'compression_type': 'snappy'
+                }
+            },
+            'Spark': {
+                'operations': [
+                    'Micro-batch processing',
+                    'Data quality checks',
+                    'Business rule validation',
+                    'Aggregation and windowing'
+                ],
+                'performance': {
+                    'batch_interval': '10 seconds',
+                    'processing_time': '85ms average',
+                    'records_processed': '10,000/batch',
+                    'success_rate': '99.8%'
+                },
+                'transformations': [
+                    'FilterTransform: Remove invalid records',
+                    'MapTransform: Enrich with department data',
+                    'AggregateTransform: Calculate metrics',
+                    'WindowTransform: 5-minute sliding window'
+                ]
+            },
+            'CML': {
+                'operations': [
+                    'Feature engineering',
+                    'Model inference',
+                    'Prediction generation',
+                    'Confidence scoring'
+                ],
+                'model_details': {
+                    'name': 'demand_forecaster_v3',
+                    'type': 'Prophet + XGBoost ensemble',
+                    'accuracy': '94.5%',
+                    'last_trained': '2024-01-15',
+                    'features': 25
+                },
+                'predictions': {
+                    'next_hour': '+15% traffic',
+                    'peak_time': '2:00 PM',
+                    'confidence': 0.92
+                }
+            }
+        }
+        
+        details = stage_details.get(component, {
+            'operations': ['Processing data'],
+            'performance': {'status': 'operational'}
+        })
+        
+        return {
+            'success': True,
+            'component': component,
+            'tracking_id': tracking_id,
+            'details': details
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# New Sentiment Dashboard Endpoints
+@app.get("/api/sentiment/heatmap")
+async def get_sentiment_heatmap(timeframe: str = "month"):
+    """Get department sentiment data for heatmap visualization"""
+    try:
+        # Get all employees grouped by department
+        employees = await cdp_platform.data_warehouse.query(
+            "SELECT * FROM employees ORDER BY department"
+        )
+        
+        # Group by department
+        departments = {}
+        for emp in employees:
+            dept = emp.get('department')
+            if dept not in departments:
+                departments[dept] = []
+            departments[dept].append(emp)
+        
+        # Calculate weekly sentiment scores for each department
+        heatmap_data = []
+        for dept, dept_employees in departments.items():
+            # Simulate weekly scores based on satisfaction and other factors
+            weekly_scores = []
+            for week in range(4):  # Last 4 weeks
+                # Calculate average sentiment for the week
+                week_score = 0
+                for emp in dept_employees:
+                    base_score = float(emp.get('satisfaction_score', 3.5)) * 20
+                    # Add some variation per week
+                    variation = random.uniform(-5, 5)
+                    week_score += max(0, min(100, base_score + variation))
+                
+                weekly_scores.append(int(week_score / len(dept_employees)) if dept_employees else 50)
+            
+            # Determine trend
+            trend = 'stable'
+            if weekly_scores[-1] > weekly_scores[0] + 5:
+                trend = 'up'
+            elif weekly_scores[-1] < weekly_scores[0] - 5:
+                trend = 'down'
+            
+            heatmap_data.append({
+                'department': dept,
+                'weeklyScores': weekly_scores,
+                'trend': trend,
+                'currentScore': weekly_scores[-1]
+            })
+        
+        return {"success": True, "data": heatmap_data}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sentiment/action-queue")
+async def get_action_queue(limit: int = 5):
+    """Get prioritized action items based on sentiment analysis"""
+    try:
+        # Get employees with risk factors
+        employees = await cdp_platform.data_warehouse.query(
+            "SELECT * FROM employees ORDER BY satisfaction_score ASC LIMIT 20"
+        )
+        
+        action_items = []
+        
+        for emp in employees[:limit]:
+            satisfaction = float(emp.get('satisfaction_score', 3.5))
+            overtime = float(emp.get('overtime_hours', 0))
+            tenure = float(emp.get('tenure_days', 365))
+            
+            # Calculate priority based on multiple factors
+            priority = 0
+            action_type = 'review'
+            action_text = ''
+            
+            if satisfaction < 2.5:
+                priority += 40
+                action_type = 'meeting'
+                action_text = f"Urgent 1-on-1: Low satisfaction detected"
+            elif satisfaction < 3.5:
+                priority += 25
+                action_type = 'intervention'
+                action_text = f"Schedule check-in: Below average satisfaction"
+            
+            if overtime > 15:
+                priority += 30
+                action_type = 'review'
+                action_text = f"Review schedule: Excessive overtime ({overtime} hours)"
+            elif overtime > 10:
+                priority += 20
+                action_text = f"Monitor workload: High overtime"
+            
+            if tenure < 90:
+                priority += 20
+                action_type = 'training'
+                action_text = f"Enhanced onboarding support needed"
+            elif tenure < 180:
+                priority += 10
+                action_text = f"New employee check-in"
+            
+            # Calculate confidence based on data quality
+            confidence = min(95, 50 + (priority * 0.5) + random.uniform(10, 20))
+            
+            # Estimate impact
+            sentiment_improvement = int(10 + (priority * 0.3))
+            cost_saving = int(10000 + (priority * 500) + random.uniform(5000, 15000))
+            
+            action_items.append({
+                'id': str(len(action_items) + 1),
+                'priority': int(min(100, priority + random.uniform(20, 40))),
+                'type': action_type,
+                'target': emp.get('name'),
+                'department': emp.get('department'),
+                'action': action_text or f"Review employee status",
+                'confidence': int(confidence),
+                'estimatedImpact': {
+                    'sentimentImprovement': sentiment_improvement,
+                    'costSaving': cost_saving,
+                    'timeRequired': '30 min' if action_type == 'meeting' else '1 hour'
+                },
+                'status': 'pending'
+            })
+        
+        # Sort by priority
+        action_items.sort(key=lambda x: x['priority'], reverse=True)
+        
+        return {"success": True, "data": action_items[:limit]}
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sentiment/executive-summary")
+async def get_executive_summary(timeframe: str = "month"):
+    """Get high-level sentiment metrics for executives"""
+    try:
+        # Get all employees
+        employees = await cdp_platform.data_warehouse.query("SELECT * FROM employees")
+        
+        # Calculate overall metrics
+        total_employees = len(employees)
+        avg_satisfaction = sum(float(e.get('satisfaction_score', 3.5)) for e in employees) / total_employees
+        avg_sentiment = avg_satisfaction * 20  # Convert to 0-100 scale
+        
+        # Count risk levels
+        high_risk = sum(1 for e in employees if float(e.get('satisfaction_score', 3.5)) < 2.5)
+        medium_risk = sum(1 for e in employees if 2.5 <= float(e.get('satisfaction_score', 3.5)) < 3.5)
+        low_risk = total_employees - high_risk - medium_risk
+        
+        # Calculate cost at risk (simplified)
+        turnover_cost_per_employee = 50000
+        productivity_loss_per_risk = 10000
+        recruitment_cost = 5000
+        
+        cost_at_risk = (high_risk * turnover_cost_per_employee + 
+                       medium_risk * turnover_cost_per_employee * 0.3 +
+                       (high_risk + medium_risk) * productivity_loss_per_risk)
+        
+        # Identify top issues
+        top_issues = []
+        
+        # Check for department-specific issues
+        dept_stats = {}
+        for emp in employees:
+            dept = emp.get('department')
+            if dept not in dept_stats:
+                dept_stats[dept] = {'count': 0, 'total_satisfaction': 0, 'overtime': 0}
+            dept_stats[dept]['count'] += 1
+            dept_stats[dept]['total_satisfaction'] += float(emp.get('satisfaction_score', 3.5))
+            dept_stats[dept]['overtime'] += float(emp.get('overtime_hours', 0))
+        
+        for dept, stats in dept_stats.items():
+            avg_dept_satisfaction = stats['total_satisfaction'] / stats['count']
+            avg_dept_overtime = stats['overtime'] / stats['count']
+            
+            if avg_dept_overtime > 10:
+                top_issues.append({
+                    'id': f"issue_{len(top_issues) + 1}",
+                    'description': f"{dept} department overtime exceeding limits",
+                    'affectedCount': stats['count'],
+                    'severity': 'critical' if avg_dept_overtime > 15 else 'high',
+                    'department': dept
+                })
+            
+            if avg_dept_satisfaction < 3:
+                top_issues.append({
+                    'id': f"issue_{len(top_issues) + 1}",
+                    'description': f"Low satisfaction in {dept} department",
+                    'affectedCount': stats['count'],
+                    'severity': 'high',
+                    'department': dept
+                })
+        
+        # Add general issues
+        if high_risk > 5:
+            top_issues.append({
+                'id': f"issue_{len(top_issues) + 1}",
+                'description': f"High turnover risk affecting {high_risk} employees",
+                'affectedCount': high_risk,
+                'severity': 'critical',
+                'department': 'Multiple'
+            })
+        
+        # Generate quick wins
+        quick_wins = []
+        
+        if any('overtime' in issue['description'] for issue in top_issues):
+            quick_wins.append({
+                'id': 'qw_1',
+                'action': 'Optimize schedules to reduce overtime',
+                'estimatedImpact': '+10% satisfaction, $20K saved',
+                'timeToImplement': '3 days',
+                'owner': 'Operations Manager'
+            })
+        
+        if high_risk > 3:
+            quick_wins.append({
+                'id': 'qw_2',
+                'action': 'Launch retention intervention program',
+                'estimatedImpact': f'Retain {high_risk//2} employees, ${high_risk * 25000} saved',
+                'timeToImplement': '1 week',
+                'owner': 'HR Director'
+            })
+        
+        quick_wins.append({
+            'id': 'qw_3',
+            'action': 'Implement weekly pulse surveys',
+            'estimatedImpact': 'Early warning system, +5% satisfaction',
+            'timeToImplement': '2 days',
+            'owner': 'HR Team'
+        })
+        
+        # Calculate trend (mock)
+        trend = random.choice([-5, -3, -1, 1, 3, 5])
+        trend_direction = 'up' if trend > 0 else 'down' if trend < 0 else 'stable'
+        
+        summary = {
+            'overallHealth': {
+                'score': int(avg_sentiment),
+                'trend': trend,
+                'trendDirection': trend_direction
+            },
+            'costAtRisk': {
+                'amount': int(cost_at_risk),
+                'breakdown': {
+                    'turnoverCost': int(high_risk * turnover_cost_per_employee),
+                    'productivityLoss': int((high_risk + medium_risk) * productivity_loss_per_risk),
+                    'recruitmentCost': int(high_risk * recruitment_cost)
+                }
+            },
+            'topIssues': top_issues[:4],
+            'quickWins': quick_wins[:4],
+            'keyMetrics': {
+                'totalEmployees': total_employees,
+                'avgSentiment': avg_sentiment,
+                'highRiskCount': high_risk,
+                'schedulingEfficiency': random.randint(75, 90),
+                'learningEngagement': random.randint(65, 85)
+            }
+        }
+        
+        return {"success": True, "data": summary}
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

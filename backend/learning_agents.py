@@ -333,6 +333,13 @@ class LearningAgentsManager:
             # Extract JSON from string response
             response_str = str(response)
             
+            # Remove markdown code block markers if present
+            if '```json' in response_str:
+                json_start = response_str.find('```json') + 7
+                json_end = response_str.rfind('```')
+                if json_start > 6 and json_end > json_start:
+                    response_str = response_str[json_start:json_end].strip()
+            
             # Look for JSON markers
             json_start = response_str.find('{')
             json_end = response_str.rfind('}') + 1
@@ -340,8 +347,8 @@ class LearningAgentsManager:
             if json_start != -1 and json_end > json_start:
                 json_str = response_str[json_start:json_end]
                 return json.loads(json_str)
-        except:
-            pass
+        except Exception as e:
+            print(f"Error parsing JSON response: {e}")
         
         # Fallback structure
         return {
@@ -350,6 +357,199 @@ class LearningAgentsManager:
             'status': 'processed',
             'confidence': 0.88
         }
+    
+    async def create_individual_learning_path(self, employee_data: Dict, career_goals: Dict) -> Dict[str, Any]:
+        """
+        Create a personalized learning path for a single employee
+        
+        Args:
+            employee_data: Employee information (role, skills, performance)
+            career_goals: Target role, timeframe, and focus areas from frontend
+            
+        Returns:
+            Personalized learning path with modules, milestones, and recommendations
+        """
+        
+        # Extract goals from frontend
+        target_role = career_goals.get('target_role', 'Senior Associate')
+        timeframe = career_goals.get('target_timeframe', '12_months')
+        focus_areas = career_goals.get('focus_areas', [])
+        
+        # Convert timeframe to weeks
+        timeframe_weeks = {
+            '6_months': 26,
+            '12_months': 52,
+            '18_months': 78,
+            '24_months': 104
+        }.get(timeframe, 52)
+        
+        # Task 1: Analyze skill gaps for this specific employee
+        skills_task = Task(
+            description=f"""
+            Analyze skill gaps for {employee_data.get('name', 'Employee')}.
+            
+            Current role: {employee_data.get('role', 'Unknown')}
+            Target role: {target_role}
+            Focus areas: {', '.join(focus_areas)}
+            Performance score: {employee_data.get('performance_score', 3.0)}
+            Skill level: {employee_data.get('skill_level', 2)}/5
+            
+            Identify:
+            1. Skills needed for {target_role}
+            2. Current skill gaps
+            3. Priority order for skill development
+            4. Estimated time to develop each skill
+            
+            Return JSON with skill_gaps array including skill name, current level, target level, and weeks to develop.
+            """,
+            agent=self.skills_analyzer,
+            expected_output="JSON with detailed skill gap analysis"
+        )
+        
+        # Task 2: Design learning path
+        path_task = Task(
+            description=f"""
+            Design a personalized learning path for {employee_data.get('name')}.
+            
+            Career goal: Move from {employee_data.get('role')} to {target_role}
+            Timeframe: {timeframe_weeks} weeks
+            Focus areas: {', '.join(focus_areas)}
+            
+            Create a structured learning path with:
+            1. Learning modules (name, duration_weeks, difficulty, skills covered)
+            2. Milestones (week number, achievement, skills gained)
+            3. Recommended actions for success
+            4. Estimated completion timeline
+            
+            Make it realistic and achievable within the timeframe.
+            
+            Return JSON with modules array, milestones array, and recommended_actions array.
+            """,
+            agent=self.path_designer,
+            expected_output="JSON with learning modules and milestones"
+        )
+        
+        # Run the crew with both tasks
+        crew = Crew(
+            agents=[self.skills_analyzer, self.path_designer],
+            tasks=[skills_task, path_task],
+            process=Process.sequential,
+            verbose=True
+        )
+        
+        result = crew.kickoff()
+        
+        # Parse the AI response
+        parsed_result = self._parse_json_response(result, 'learning_path')
+        
+        # Structure the response for frontend
+        learning_path = {
+            'path_id': f"path_{employee_data.get('employee_id', 'unknown')}_{datetime.now().strftime('%Y%m%d')}",
+            'employee_id': employee_data.get('employee_id', 'unknown'),
+            'current_role': employee_data.get('role', 'Unknown'),
+            'target_role': target_role,
+            'total_duration_weeks': timeframe_weeks,
+            'modules': self._extract_modules(parsed_result),
+            'milestones': self._extract_milestones(parsed_result),
+            'current_progress': 0,
+            'skill_gaps': self._extract_skill_gaps(parsed_result, focus_areas),
+            'recommended_actions': self._extract_recommendations(parsed_result, target_role)
+        }
+        
+        return learning_path
+    
+    def _extract_modules(self, parsed_result: Dict) -> List[Dict]:
+        """Extract learning modules from AI response"""
+        if 'modules' in parsed_result and parsed_result['modules']:
+            modules = parsed_result['modules']
+            # Ensure each module has required fields
+            processed_modules = []
+            for i, module in enumerate(modules):
+                processed_module = {
+                    'id': module.get('id', f'mod_{i+1}'),
+                    'name': module.get('name', f'Module {i+1}'),
+                    'duration_weeks': module.get('duration_weeks', 4),
+                    'difficulty': module.get('difficulty', 'intermediate').lower(),
+                    'skills': module.get('skills', module.get('skills_covered', []))
+                }
+                # Ensure skills is always a list
+                if not isinstance(processed_module['skills'], list):
+                    processed_module['skills'] = [processed_module['skills']] if processed_module['skills'] else []
+                processed_modules.append(processed_module)
+            return processed_modules
+        
+        # Default modules if AI doesn't provide specific ones
+        return [
+            {
+                'id': 'mod_1',
+                'name': 'Foundation Skills',
+                'duration_weeks': 4,
+                'difficulty': 'beginner',
+                'skills': ['Customer Service', 'Product Knowledge']
+            },
+            {
+                'id': 'mod_2',
+                'name': 'Advanced Techniques',
+                'duration_weeks': 6,
+                'difficulty': 'intermediate',
+                'skills': ['Sales Techniques', 'Problem Solving']
+            },
+            {
+                'id': 'mod_3',
+                'name': 'Leadership Development',
+                'duration_weeks': 8,
+                'difficulty': 'advanced',
+                'skills': ['Team Management', 'Communication']
+            }
+        ]
+    
+    def _extract_milestones(self, parsed_result: Dict) -> List[Dict]:
+        """Extract milestones from AI response"""
+        if 'milestones' in parsed_result and parsed_result['milestones']:
+            milestones = parsed_result['milestones']
+            # Ensure each milestone has required fields
+            processed_milestones = []
+            for milestone in milestones:
+                processed_milestone = {
+                    'week': milestone.get('week', milestone.get('week_number', 0)),
+                    'milestone': milestone.get('milestone', milestone.get('achievement', 'Milestone')),
+                    'skills_gained': milestone.get('skills_gained', [])
+                }
+                # Ensure skills_gained is always a list
+                if not isinstance(processed_milestone['skills_gained'], list):
+                    processed_milestone['skills_gained'] = [processed_milestone['skills_gained']] if processed_milestone['skills_gained'] else []
+                processed_milestones.append(processed_milestone)
+            return processed_milestones
+        
+        # Default milestones
+        return [
+            {'week': 4, 'milestone': 'Complete Foundation Training', 'skills_gained': ['Basic Skills']},
+            {'week': 8, 'milestone': 'Pass First Assessment', 'skills_gained': ['Customer Service']},
+            {'week': 16, 'milestone': 'Complete Intermediate Modules', 'skills_gained': ['Sales Techniques']},
+            {'week': 26, 'milestone': 'Ready for Role Transition', 'skills_gained': ['Leadership']}
+        ]
+    
+    def _extract_skill_gaps(self, parsed_result: Dict, focus_areas: List[str]) -> List[str]:
+        """Extract skill gaps from AI response"""
+        if 'skill_gaps' in parsed_result:
+            return parsed_result['skill_gaps']
+        
+        # Use focus areas as skill gaps
+        return focus_areas if focus_areas else ['Leadership', 'Communication', 'Technical Skills']
+    
+    def _extract_recommendations(self, parsed_result: Dict, target_role: str) -> List[str]:
+        """Extract recommendations from AI response"""
+        if 'recommended_actions' in parsed_result:
+            return parsed_result['recommended_actions']
+        
+        # Default recommendations
+        return [
+            f"Schedule weekly 1-on-1s with current {target_role} to understand role",
+            "Dedicate 2 hours per week for focused learning",
+            "Apply new skills in current role immediately",
+            "Seek feedback from manager monthly",
+            "Join peer learning group for motivation"
+        ]
     
     def _generate_sample_paths(self, employees: List[Dict]) -> List[Dict]:
         """Generate sample learning paths for demonstration"""

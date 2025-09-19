@@ -244,7 +244,7 @@ class RetentionAgentsManager:
             'compensation_insights': self._parse_json_response(comp_result, 'compensation'),
             'retention_strategy': self._parse_json_response(strategy_result, 'strategy'),
             'executive_summary': {
-                'high_risk_count': len([e for e in employee_data if hash(e['id']) % 10 < 3]),  # Simulated
+                'high_risk_count': len([e for e in employee_data if hash(e.get('employee_id', e.get('id', 'unknown'))) % 10 < 3]),  # Simulated
                 'average_risk_score': 42,  # Would be calculated from actual risk analysis
                 'top_risk_factors': ['Limited growth opportunities', 'Compensation gaps', 'Work-life balance'],
                 'estimated_turnover_cost': len(employee_data) * 0.15 * 50000,  # 15% turnover * $50k replacement cost
