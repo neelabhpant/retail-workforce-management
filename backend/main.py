@@ -143,6 +143,11 @@ class SentimentAnalysisRequest(BaseModel):
     department: Optional[str] = None
     include_team: Optional[bool] = False
 
+class SentimentCellAnalysisRequest(BaseModel):
+    department: str
+    week: int
+    score: int
+
 class PulseSurveyRequest(BaseModel):
     focus_area: Optional[str] = "general"
     employee_ids: Optional[List[str]] = None
@@ -772,6 +777,29 @@ async def analyze_sentiment(request: SentimentAnalysisRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/sentiment/analyze-cell")
+async def analyze_sentiment_cell(request: SentimentCellAnalysisRequest):
+    """Analyze a specific heat map cell using AI agents"""
+    try:
+        employees = await cdp_platform.data_warehouse.query(
+            "SELECT * FROM employees"
+        )
+        
+        result = await sentiment_agents.analyze_department_cell(
+            department=request.department,
+            week=request.week,
+            score=request.score,
+            employee_data=employees
+        )
+        
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        print(f"Sentiment cell analysis error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/sentiment/pulse-survey")
 async def create_pulse_survey(request: PulseSurveyRequest):
     """Generate and distribute pulse surveys"""
@@ -944,13 +972,14 @@ async def optimize_schedule_crewai(request: ScheduleRequest):
         
         # Run AI-powered CrewAI optimization with Prophet forecast
         # Set a timeout for the entire operation
+        # Note: 5 AI agents run sequentially, each can take 60-120 seconds
         try:
             result = await asyncio.wait_for(
                 scheduling_agents.optimize_schedule_with_agents(request_dict, prophet_forecast),
-                timeout=180  # 3 minutes total timeout
+                timeout=480  # 8 minutes total timeout (5 agents × ~90s each + buffer)
             )
         except asyncio.TimeoutError:
-            print("ERROR: Schedule optimization timed out after 3 minutes")
+            print("ERROR: Schedule optimization timed out after 8 minutes")
             # Generate a basic fallback schedule
             result = {
                 'optimization_id': f'timeout_{datetime.now().strftime("%Y%m%d_%H%M%S")}',

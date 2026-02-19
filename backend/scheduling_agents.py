@@ -195,7 +195,7 @@ class SchedulingAgentsManager:
             )
         
             try:
-                demand_result = await self.run_crew_with_timeout(crew, timeout=60)
+                demand_result = await self.run_crew_with_timeout(crew, timeout=180)
                 await self.broadcast_agent_status("demand_forecaster", "completed", 25, 
                                                  "Department demand forecast completed", 0.92)
             except TimeoutError:
@@ -217,49 +217,52 @@ class SchedulingAgentsManager:
             # Step 2: Staff Optimization - Create shifts based on demand
             await self.broadcast_agent_status("staff_optimizer", "analyzing", 30, "Creating optimal shift assignments...")
             
+            # Build dynamic examples for ALL requested departments
+            example_shifts = []
+            for i, dept in enumerate(departments):
+                dept_key = dept.lower().replace(' ', '_')
+                example_shifts.append({
+                    "id": f"shift_0_{dept_key}_morning",
+                    "employee_id": f"emp_{i:03d}",
+                    "employee_name": f"Employee {i+1}",
+                    "department": dept,
+                    "day": 0,
+                    "start_time": "09:00",
+                    "end_time": "17:00",
+                    "confidence": 0.85 + (i * 0.02),
+                    "reason": f"Experienced employee for {dept}"
+                })
+            
+            example_json = json.dumps({"shifts": example_shifts}, indent=12)
+            
             staff_task = Task(
                 description=f"""
                 Create optimal staff schedules. OUTPUT ONLY VALID JSON, NOTHING ELSE.
                 
                 Department Demand: {json.dumps(demand_data, indent=2)}
                 Employees: {employee_context}
-                Departments to schedule: {departments}
                 
-                YOU MUST OUTPUT EXACTLY THIS JSON STRUCTURE:
-                {{
-                    "shifts": [
-                        {{
-                            "id": "shift_0_sales_morning",
-                            "employee_id": "emp_001",
-                            "employee_name": "Employee 1",
-                            "department": "Sales Floor",
-                            "day": 0,
-                            "start_time": "09:00",
-                            "end_time": "17:00",
-                            "confidence": 0.9,
-                            "reason": "Experienced employee, matches department skills"
-                        }},
-                        {{
-                            "id": "shift_0_customer_morning",
-                            "employee_id": "emp_002", 
-                            "employee_name": "Employee 2",
-                            "department": "Customer Service",
-                            "day": 0,
-                            "start_time": "09:00",
-                            "end_time": "17:00",
-                            "confidence": 0.85,
-                            "reason": "Strong customer service skills"
-                        }}
-                    ]
-                }}
+                CRITICAL REQUIREMENT: You MUST create shifts for ALL of these departments: {departments}
+                Each department needs 2 shifts per day (morning and evening) for all 7 days.
+                That means {len(departments)} departments × 2 shifts × 7 days = {len(departments) * 2 * 7} total shifts.
                 
-                Create 2 shifts per day (morning 09:00-17:00, evening 17:00-21:00) for each department.
-                Days: 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday
+                YOU MUST OUTPUT EXACTLY THIS JSON STRUCTURE (example shows Day 0 morning shifts for each department):
+                {example_json}
+                
+                For the full schedule, create shifts following this pattern:
+                - Morning shift: 09:00-17:00
+                - Evening shift: 17:00-21:00
+                - Days: 0=Monday, 1=Tuesday, 2=Wednesday, 3=Thursday, 4=Friday, 5=Saturday, 6=Sunday
+                
+                IMPORTANT: 
+                - Include ALL departments: {', '.join(departments)}
+                - Each department MUST have shifts for all 7 days
+                - Each shift needs: id, employee_id, employee_name, department, day, start_time, end_time, confidence, reason
                 
                 CRITICAL: Output ONLY the JSON object. No explanations, no text before or after.
                 """,
                 agent=self.staff_agent,
-                expected_output="Valid JSON object containing shifts array"
+                expected_output="Valid JSON object containing shifts array with shifts for ALL requested departments"
             )
             
             crew = Crew(
@@ -271,7 +274,7 @@ class SchedulingAgentsManager:
             )
             
             try:
-                staff_result = await self.run_crew_with_timeout(crew, timeout=60)
+                staff_result = await self.run_crew_with_timeout(crew, timeout=180)
                 await self.broadcast_agent_status("staff_optimizer", "completed", 50, 
                                                  "Shift optimization completed", 0.88)
             except TimeoutError:
@@ -280,13 +283,16 @@ class SchedulingAgentsManager:
                 await self.broadcast_agent_status("staff_optimizer", "completed", 50, 
                                                  "Used simplified schedule (timeout)", 0.70)
             
-            # Parse staff result - NO FALLBACKS
+            # Parse staff result - with validation for missing departments
             try:
                 schedule_data = self._parse_agent_response(staff_result, 'schedule')
                 print(f"Parsed schedule data: {len(schedule_data.get('shifts', []))} shifts")
                 if schedule_data.get('shifts'):
                     print(f"First AI-generated shift: {schedule_data['shifts'][0]}")
                     print(f"SUCCESS: AI generated {len(schedule_data['shifts'])} shifts!")
+                    
+                    # Validate all departments have shifts, fill missing ones
+                    schedule_data = self._validate_and_fill_missing_departments(schedule_data, departments)
                 else:
                     print("ERROR: AI agent did not generate any shifts")
                     schedule_data = {'shifts': [], 'error': 'No shifts generated by AI'}
@@ -331,7 +337,7 @@ class SchedulingAgentsManager:
             )
             
             try:
-                cost_result = await self.run_crew_with_timeout(crew, timeout=60)
+                cost_result = await self.run_crew_with_timeout(crew, timeout=120)
                 await self.broadcast_agent_status("cost_analyst", "completed", 70, 
                                                  "Cost analysis completed", 0.95)
             except TimeoutError:
@@ -380,7 +386,7 @@ class SchedulingAgentsManager:
                     max_execution_time=300  # 5 minutes timeout
                 )
                 
-                compliance_result = await self.run_crew_with_timeout(crew, timeout=60)
+                compliance_result = await self.run_crew_with_timeout(crew, timeout=120)
                 await self.broadcast_agent_status("compliance_checker", "completed", 85, 
                                                  "Compliance check completed", 0.98)
                 
@@ -430,7 +436,7 @@ class SchedulingAgentsManager:
                     max_execution_time=300  # 5 minutes timeout
                 )
                 
-                quality_result = await self.run_crew_with_timeout(crew, timeout=60)
+                quality_result = await self.run_crew_with_timeout(crew, timeout=120)
                 await self.broadcast_agent_status("quality_auditor", "completed", 100, 
                                                  "Quality assessment completed", 0.94)
                 
@@ -736,6 +742,61 @@ class SchedulingAgentsManager:
             ]
         }
     
+    def _validate_and_fill_missing_departments(self, schedule_data: Dict, departments: List[str]) -> Dict:
+        """Validate all requested departments have shifts, generate for missing ones"""
+        shifts = schedule_data.get('shifts', [])
+        
+        # Normalize department names for comparison (case-insensitive)
+        existing_depts = set()
+        for shift in shifts:
+            dept = shift.get('department', '')
+            # Store the normalized version but also fix the shift's department name
+            for req_dept in departments:
+                if dept.lower() == req_dept.lower():
+                    shift['department'] = req_dept  # Normalize to requested format
+                    existing_depts.add(req_dept)
+                    break
+            else:
+                existing_depts.add(dept)
+        
+        # Find missing departments
+        missing_depts = set(departments) - existing_depts
+        
+        if missing_depts:
+            print(f"WARNING: AI response missing departments: {missing_depts}")
+            print(f"Generating shifts for missing departments...")
+            
+            # Generate shifts for missing departments
+            for dept in missing_depts:
+                for day_idx in range(7):
+                    for shift_time in ['morning', 'evening']:
+                        if self.employees_data:
+                            # Try to find an employee with skills for this department
+                            suitable_emps = [e for e in self.employees_data 
+                                           if dept in e.get('skills', []) or dept == e.get('department')]
+                            emp = random.choice(suitable_emps) if suitable_emps else random.choice(self.employees_data)
+                        else:
+                            emp = {'id': f'emp_{day_idx:03d}', 'name': f'Employee {day_idx+1}'}
+                        
+                        shift = {
+                            'id': f'shift_{day_idx}_{dept.lower().replace(" ", "_")}_{shift_time}',
+                            'day': day_idx,
+                            'department': dept,
+                            'employee_id': emp['id'],
+                            'employee_name': emp.get('name', 'Unknown'),
+                            'start_time': '09:00' if shift_time == 'morning' else '17:00',
+                            'end_time': '17:00' if shift_time == 'morning' else '21:00',
+                            'confidence': 0.80,
+                            'reason': f'Auto-generated shift for {dept} coverage (AI missed this department)'
+                        }
+                        shifts.append(shift)
+            
+            print(f"Added {len(missing_depts) * 14} shifts for missing departments")
+        
+        schedule_data['shifts'] = shifts
+        schedule_data['total_shifts'] = len(shifts)
+        return schedule_data
+    
     def _generate_fallback_demand(self, prophet_forecast: Dict, departments: List[str]) -> Dict:
         """Generate fallback demand data if AI parsing fails"""
         total_customers = prophet_forecast.get('total_weekly_customers', 7000)
@@ -922,7 +983,7 @@ class SchedulingAgentsManager:
     def _generate_realistic_employees(self) -> List[Dict[str, Any]]:
         """Generate realistic employee profiles"""
         employees = []
-        departments = ['Sales Floor', 'Customer Service', 'Electronics', 'Clothing', 'Grocery']
+        departments = ['Sales Floor', 'Customer Service', 'Electronics', 'Home & Garden', 'Inventory', 'Clothing', 'Grocery']
         
         for i in range(30):  # Create 30 employees
             dept = random.choice(departments)

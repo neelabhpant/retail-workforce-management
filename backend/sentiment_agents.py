@@ -458,5 +458,197 @@ class SentimentAnalysisManager:
         concern_counts = Counter(all_concerns)
         return [concern for concern, _ in concern_counts.most_common(5)]
 
+    async def analyze_department_cell(self, 
+                                      department: str,
+                                      week: int,
+                                      score: int,
+                                      employee_data: List[Dict]) -> Dict[str, Any]:
+        """
+        Analyze a specific heat map cell (department + week) using AI agents
+        
+        Args:
+            department: Department name
+            week: Week index (0-3)
+            score: Sentiment score for this cell (0-100)
+            employee_data: List of employees in this department
+            
+        Returns:
+            Comprehensive cell insight with root causes and recommendations
+        """
+        
+        week_labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4']
+        week_label = week_labels[week] if 0 <= week < 4 else f'Week {week + 1}'
+        
+        risk_level = 'critical' if score < 40 else 'warning' if score < 70 else 'healthy'
+        
+        dept_employees = [e for e in employee_data if e.get('department') == department]
+        avg_overtime = sum(e.get('overtime_hours', 0) for e in dept_employees) / max(len(dept_employees), 1)
+        avg_tenure = sum(e.get('tenure_days', 365) for e in dept_employees) / max(len(dept_employees), 1)
+        avg_satisfaction = sum(e.get('satisfaction_score', 3.5) for e in dept_employees) / max(len(dept_employees), 1)
+        
+        analysis_task = Task(
+            description=f"""
+            Analyze why the {department} department has a sentiment score of {score}/100 during {week_label}.
+            
+            Department Context:
+            - Current sentiment score: {score}/100 (Risk level: {risk_level})
+            - Number of employees: {len(dept_employees)}
+            - Average overtime hours: {avg_overtime:.1f} hours/week
+            - Average tenure: {avg_tenure:.0f} days
+            - Average satisfaction rating: {avg_satisfaction:.1f}/5
+            
+            Provide a comprehensive analysis including:
+            1. A 2-3 sentence executive summary explaining the sentiment score
+            2. The primary factors driving this sentiment level
+            3. Whether this represents improvement or decline from typical patterns
+            
+            Focus on being specific and actionable. Reference the actual metrics provided.
+            
+            Return your analysis as a clear narrative paragraph.
+            """,
+            agent=self.sentiment_collector,
+            expected_output="Narrative analysis of department sentiment"
+        )
+        
+        crew = Crew(
+            agents=[self.sentiment_collector],
+            tasks=[analysis_task],
+            process=Process.sequential,
+            verbose=True
+        )
+        
+        analysis_result = crew.kickoff()
+        
+        root_cause_task = Task(
+            description=f"""
+            Identify the root causes behind {department}'s sentiment score of {score}/100.
+            
+            Available Data:
+            - Employee count: {len(dept_employees)}
+            - Overtime: {avg_overtime:.1f} hrs/week (target: 5 hrs)
+            - Tenure: {avg_tenure:.0f} days average
+            - Satisfaction: {avg_satisfaction:.1f}/5
+            - Week: {week_label}
+            
+            Based on this data and typical retail workforce patterns, identify exactly 4 specific root causes.
+            
+            Format each root cause as a single, specific statement with a metric where possible.
+            Example: "Overtime 40% above target at 7.2 hours/week average"
+            
+            Return exactly 4 root causes as a numbered list.
+            """,
+            agent=self.behavioral_analyst,
+            expected_output="4 specific root causes as numbered list"
+        )
+        
+        crew = Crew(
+            agents=[self.behavioral_analyst],
+            tasks=[root_cause_task],
+            process=Process.sequential,
+            verbose=True
+        )
+        
+        root_cause_result = crew.kickoff()
+        
+        recommendation_task = Task(
+            description=f"""
+            Create 3 prioritized intervention recommendations for {department} (sentiment: {score}/100).
+            
+            Context:
+            - Risk level: {risk_level}
+            - Key issue: {'Critical engagement crisis' if score < 40 else 'Moderate concerns need attention' if score < 70 else 'Maintain positive momentum'}
+            - Team size: {len(dept_employees)} employees
+            
+            For each recommendation, provide:
+            1. A specific action (start with a verb: "Implement...", "Schedule...", "Review...")
+            2. Expected impact (e.g., "+15% sentiment", "$X saved", "Prevent turnover")
+            3. Urgency level: high, medium, or low
+            
+            Format as 3 recommendations, ordered by urgency (high first).
+            
+            Return as JSON array:
+            [
+              {{"action": "...", "impact": "...", "urgency": "high"}},
+              {{"action": "...", "impact": "...", "urgency": "medium"}},
+              {{"action": "...", "impact": "...", "urgency": "low"}}
+            ]
+            """,
+            agent=self.sentiment_strategist,
+            expected_output="JSON array of 3 recommendations"
+        )
+        
+        crew = Crew(
+            agents=[self.sentiment_strategist],
+            tasks=[recommendation_task],
+            process=Process.sequential,
+            verbose=True
+        )
+        
+        recommendation_result = crew.kickoff()
+        
+        root_causes = self._parse_root_causes(str(root_cause_result))
+        recommendations = self._parse_recommendations(str(recommendation_result))
+        
+        return {
+            'department': department,
+            'week': week,
+            'score': score,
+            'analysis': str(analysis_result),
+            'rootCauses': root_causes,
+            'recommendations': recommendations,
+            'affectedEmployees': len(dept_employees),
+            'riskLevel': risk_level,
+            'generatedAt': datetime.now().isoformat(),
+            'aiGenerated': True
+        }
+    
+    def _parse_root_causes(self, response: str) -> List[str]:
+        """Parse root causes from AI response"""
+        causes = []
+        lines = response.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line and (line[0].isdigit() or line.startswith('-') or line.startswith('•')):
+                cleaned = line.lstrip('0123456789.-•) ').strip()
+                if cleaned and len(cleaned) > 10:
+                    causes.append(cleaned)
+        
+        if len(causes) < 4:
+            defaults = [
+                'Workload distribution requires optimization',
+                'Team communication patterns need improvement',
+                'Growth opportunities are limited',
+                'Work-life balance concerns detected'
+            ]
+            causes.extend(defaults[len(causes):4])
+        
+        return causes[:4]
+    
+    def _parse_recommendations(self, response: str) -> List[Dict]:
+        """Parse recommendations from AI response"""
+        try:
+            json_start = response.find('[')
+            json_end = response.rfind(']') + 1
+            if json_start != -1 and json_end > json_start:
+                json_str = response[json_start:json_end]
+                recs = json.loads(json_str)
+                if isinstance(recs, list) and len(recs) > 0:
+                    return [
+                        {
+                            'action': r.get('action', 'Review and address concerns'),
+                            'impact': r.get('impact', 'Improved engagement'),
+                            'urgency': r.get('urgency', 'medium')
+                        }
+                        for r in recs[:3]
+                    ]
+        except:
+            pass
+        
+        return [
+            {'action': 'Schedule 1-on-1 meetings with team members', 'impact': '+15% engagement', 'urgency': 'high'},
+            {'action': 'Review workload distribution and staffing levels', 'impact': 'Reduced burnout risk', 'urgency': 'medium'},
+            {'action': 'Implement recognition program for achievements', 'impact': '+10% satisfaction', 'urgency': 'low'}
+        ]
+
 # Create singleton instance
 sentiment_agents = SentimentAnalysisManager()

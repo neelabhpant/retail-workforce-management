@@ -13,9 +13,10 @@ const apiClient = axios.create({
 });
 
 // API Client for AI/ML operations that take longer
+// CrewAI agents make 5 sequential LLM calls, each can take 60-120 seconds
 const aiApiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120000, // 2 minutes for AI operations
+  timeout: 600000, // 10 minutes for AI operations (5 agents × ~90s each + buffer)
   headers: {
     'Content-Type': 'application/json',
   },
@@ -152,14 +153,22 @@ export interface RetentionAnalysis {
     risk_factors: string[];
     interventions: string[];
     predicted_outcome?: number;
+    satisfaction_score?: number;
+    performance_score?: number;
+    sentiment_trend?: string;
   }>;
   summary: {
     high_risk_count: number;
     medium_risk_count: number;
     low_risk_count: number;
     average_risk: number;
+    total_employees?: number;
+    average_risk_score?: number;
+    top_risk_factors?: string[];
   };
   department_trends: Record<string, number>;
+  recommendations?: string[];
+  risk_factors?: string[];
 }
 
 export interface LearningPath {
@@ -459,6 +468,47 @@ export const api = {
     const response = await apiClient.post('/api/data/generate', {}, {
       params: { data_type: dataType, count }
     });
+    return response.data;
+  },
+  
+  // New Sentiment Dashboard endpoints
+  async getSentimentHeatmap(timeframe: string = 'month') {
+    const response = await apiClient.get('/api/sentiment/heatmap', {
+      params: { timeframe }
+    });
+    return response.data;
+  },
+  
+  async getActionQueue(limit: number = 5) {
+    const response = await apiClient.get('/api/sentiment/action-queue', {
+      params: { limit }
+    });
+    return response.data;
+  },
+  
+  async getExecutiveSummary(timeframe: string = 'month') {
+    const response = await apiClient.get('/api/sentiment/executive-summary', {
+      params: { timeframe }
+    });
+    return response.data;
+  },
+  
+  async exportExecutiveSummary(format: 'pdf' | 'ppt', timeframe: string = 'month') {
+    const response = await apiClient.post('/api/sentiment/executive-summary/export', {
+      format,
+      timeframe
+    });
+    return response.data;
+  },
+
+  async analyzeSentimentCell(department: string, week: number, score: number) {
+    console.log('AI API Request (long-running): POST /api/sentiment/analyze-cell');
+    const response = await apiClient.post('/api/sentiment/analyze-cell', {
+      department,
+      week,
+      score
+    }, { timeout: 300000 });
+    console.log('AI API Response received');
     return response.data;
   }
 };

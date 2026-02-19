@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Calendar, 
   Users, 
   TrendingUp, 
   AlertTriangle, 
@@ -11,18 +10,27 @@ import {
   Play,
   RefreshCw,
   Download,
-  Bot
+  Bot,
+  CheckCircle,
+  Lightbulb
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { api, OptimizationResult, DemandForecastResult } from '../services/api';
 import { format, addDays, startOfWeek } from 'date-fns';
-import AgentMonitor from './AgentMonitor';
 
 interface ScheduleOptimizationRequest {
   date_range: string;
   locations: string[];
   departments: string[];
   constraints: string[];
+}
+
+
+interface AgentProgress {
+  name: string;
+  displayName: string;
+  status: 'waiting' | 'working' | 'completed';
+  decision: string;
 }
 
 const SchedulingDashboard: React.FC = () => {
@@ -34,6 +42,17 @@ const SchedulingDashboard: React.FC = () => {
   const [schedulingConstraints, setSchedulingConstraints] = useState<string[]>(['labor_cost_limit', 'employee_preferences']);
   const [useCrewAI, setUseCrewAI] = useState(true);
   const [agentUpdates, setAgentUpdates] = useState<any[]>([]);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [currentFactIndex, setCurrentFactIndex] = useState(0);
+  const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([
+    { name: 'demand_forecaster', displayName: 'Demand Forecaster', status: 'waiting', decision: 'Waiting to start...' },
+    { name: 'staff_optimizer', displayName: 'Staff Optimizer', status: 'waiting', decision: 'Waiting for demand forecast...' },
+    { name: 'cost_analyst', displayName: 'Cost Analyst', status: 'waiting', decision: 'Waiting for schedule...' },
+    { name: 'compliance_checker', displayName: 'Compliance Checker', status: 'waiting', decision: 'Waiting to verify...' },
+    { name: 'quality_auditor', displayName: 'Quality Auditor', status: 'waiting', decision: 'Waiting for final review...' },
+  ]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const factTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const departments = [
     'Sales Floor', 'Customer Service', 'Electronics', 'Clothing', 
@@ -49,9 +68,41 @@ const SchedulingDashboard: React.FC = () => {
     { id: 'coverage_goals', label: 'Coverage Goals', description: 'Maintain minimum staffing levels' }
   ];
 
+  const optimizationFacts = [
+    "AI considers 50+ factors per shift assignment",
+    "Prophet ML analyzes 365 days of historical data",
+    "Each agent specializes in one optimization domain",
+    "Skill matching ensures certified staff for each role",
+    "Labor law compliance is checked automatically",
+    "Employee preferences improve satisfaction by 23%",
+    "Real-time demand adjustments prevent overstaffing",
+    "Cross-training opportunities are identified automatically"
+  ];
+
   useEffect(() => {
     loadDemandForecast();
   }, []);
+
+  useEffect(() => {
+    if (isOptimizing) {
+      setElapsedTime(0);
+      timerRef.current = setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+      
+      factTimerRef.current = setInterval(() => {
+        setCurrentFactIndex(prev => (prev + 1) % optimizationFacts.length);
+      }, 4000);
+      
+      return () => {
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (factTimerRef.current) clearInterval(factTimerRef.current);
+      };
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (factTimerRef.current) clearInterval(factTimerRef.current);
+    }
+  }, [isOptimizing, optimizationFacts.length]);
 
   useEffect(() => {
     if (isOptimizing && useCrewAI) {
@@ -115,6 +166,7 @@ const SchedulingDashboard: React.FC = () => {
     setIsOptimizing(true);
     setOptimizationResult(null);
     setAgentUpdates([]);
+    resetAgentProgress();
     
     try {
       const weekStart = startOfWeek(new Date(selectedWeek));
@@ -179,6 +231,33 @@ const SchedulingDashboard: React.FC = () => {
   const handleAgentUpdate = (update: any) => {
     setAgentUpdates(prev => [...prev, update]);
     console.log('Agent update received:', update);
+    
+    setAgentProgress(prev => prev.map(agent => {
+      if (agent.name === update.agent) {
+        return {
+          ...agent,
+          status: update.status === 'completed' ? 'completed' : 'working',
+          decision: update.decision || agent.decision
+        };
+      }
+      return agent;
+    }));
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const resetAgentProgress = () => {
+    setAgentProgress([
+      { name: 'demand_forecaster', displayName: 'Demand Forecaster', status: 'waiting', decision: 'Waiting to start...' },
+      { name: 'staff_optimizer', displayName: 'Staff Optimizer', status: 'waiting', decision: 'Waiting for demand forecast...' },
+      { name: 'cost_analyst', displayName: 'Cost Analyst', status: 'waiting', decision: 'Waiting for schedule...' },
+      { name: 'compliance_checker', displayName: 'Compliance Checker', status: 'waiting', decision: 'Waiting to verify...' },
+      { name: 'quality_auditor', displayName: 'Quality Auditor', status: 'waiting', decision: 'Waiting for final review...' },
+    ]);
   };
 
   // Prepare chart data
@@ -327,11 +406,6 @@ const SchedulingDashboard: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* AI Agent Monitor */}
-      {(isOptimizing || optimizationResult) && useCrewAI && (
-        <AgentMonitor isActive={isOptimizing} onAgentUpdate={handleAgentUpdate} />
-      )}
 
       {/* Demand Forecast */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -520,7 +594,7 @@ const SchedulingDashboard: React.FC = () => {
                   </div>
                   {[0, 1, 2, 3, 4, 5, 6].map(day => {
                     const dayShifts = optimizationResult.shifts.filter(
-                      s => s.day === day && s.department === dept
+                      s => s.day === day && s.department?.toLowerCase() === dept.toLowerCase()
                     ).slice(0, 2);
                     
                     return (
@@ -719,37 +793,126 @@ const SchedulingDashboard: React.FC = () => {
         </motion.div>
       )}
 
-      {/* Loading State */}
+      {/* Enhanced Optimization Progress Indicator */}
       {isOptimizing && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-xl shadow-2xl border border-slate-700 overflow-hidden"
         >
-          <div className="flex flex-col items-center space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cdp-blue"></div>
-            <h3 className="text-lg font-medium text-gray-900">
-              {useCrewAI ? 'AI Agents Optimizing Schedule' : 'Optimizing Schedule'}
-            </h3>
-            <p className="text-gray-600 max-w-md">
-              {useCrewAI 
-                ? 'Multiple AI agents are collaborating to analyze demand patterns, employee preferences, and business constraints. Watch the agent monitor above for real-time progress.' 
-                : 'AI is analyzing demand patterns, employee preferences, and business constraints to create the optimal workforce schedule.'
-              }
-            </p>
-            <div className="w-64 bg-gray-200 rounded-full h-2">
-              <div className="bg-cdp-blue h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
-            </div>
-            
-            {useCrewAI && (
-              <div className="mt-6 text-sm text-gray-500 space-y-1">
-                <div className="flex items-center justify-center space-x-2">
-                  <Bot className="h-4 w-4" />
-                  <span>5 AI agents working in parallel</span>
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-slate-700">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  className="p-2 bg-blue-500/20 rounded-lg"
+                >
+                  <Bot className="h-6 w-6 text-blue-400" />
+                </motion.div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">AI Optimization in Progress</h3>
+                  <p className="text-slate-400 text-sm">5 specialized agents collaborating on your schedule</p>
                 </div>
-                <div>Expected completion: 30-60 seconds</div>
               </div>
-            )}
+              <div className="text-right">
+                <div className="text-2xl font-mono font-bold text-white">{formatTime(elapsedTime)}</div>
+                <div className="text-slate-400 text-xs">elapsed</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Progress Bar */}
+          <div className="px-6 py-4 border-b border-slate-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-slate-400">Overall Progress</span>
+              <span className="text-sm font-medium text-white">
+                {agentProgress.filter(a => a.status === 'completed').length} of 5 agents complete
+              </span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-3">
+              <motion.div
+                className="bg-gradient-to-r from-blue-500 to-purple-500 h-3 rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${(agentProgress.filter(a => a.status === 'completed').length / 5) * 100}%` }}
+                transition={{ duration: 0.5 }}
+              />
+            </div>
+          </div>
+          
+          {/* Agent Status List */}
+          <div className="px-6 py-4">
+            <div className="space-y-3">
+              {agentProgress.map((agent, index) => (
+                <motion.div
+                  key={agent.name}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className={`flex items-center space-x-3 p-3 rounded-lg ${
+                    agent.status === 'completed' ? 'bg-emerald-500/10 border border-emerald-500/30' :
+                    agent.status === 'working' ? 'bg-blue-500/10 border border-blue-500/30' :
+                    'bg-slate-800 border border-slate-700'
+                  }`}
+                >
+                  <div className="flex-shrink-0">
+                    {agent.status === 'completed' ? (
+                      <CheckCircle className="h-5 w-5 text-emerald-400" />
+                    ) : agent.status === 'working' ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      >
+                        <RefreshCw className="h-5 w-5 text-blue-400" />
+                      </motion.div>
+                    ) : (
+                      <Clock className="h-5 w-5 text-slate-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className={`font-medium ${
+                      agent.status === 'completed' ? 'text-emerald-400' :
+                      agent.status === 'working' ? 'text-blue-400' :
+                      'text-slate-400'
+                    }`}>
+                      {agent.displayName}
+                    </div>
+                    <div className="text-sm text-slate-500 truncate">{agent.decision}</div>
+                  </div>
+                  <div className={`text-xs font-medium px-2 py-1 rounded ${
+                    agent.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                    agent.status === 'working' ? 'bg-blue-500/20 text-blue-400' :
+                    'bg-slate-700 text-slate-500'
+                  }`}>
+                    {agent.status === 'completed' ? 'Done' :
+                     agent.status === 'working' ? 'Working...' :
+                     'Waiting'}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+          
+          {/* Did You Know Fact */}
+          <div className="px-6 py-4 border-t border-slate-700 bg-slate-800/50">
+            <div className="flex items-start space-x-3">
+              <Lightbulb className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Did you know?</div>
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentFactIndex}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="text-sm text-slate-300"
+                  >
+                    {optimizationFacts[currentFactIndex]}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            </div>
           </div>
         </motion.div>
       )}

@@ -90,3 +90,26 @@ coverage/
 *.pem
 *.key
 *.crt
+
+# Sharables directory
+sharables/
+
+# Demo scripts (optional docs)
+demo_scripts/
+demo_script.md
+demo_script_learning_path.md
+
+# Architecture images
+*.png
+
+# Optional project docs (not needed to run)
+CDP_Overview_Demo_Guide.md
+DEMO_GUIDE.md
+HOW_TO_USE_UI_FEATURES.md
+Project_Overview.md
+SERVICES_ARCHITECTURE.md
+project_description.md
+
+# Claude
+.claude/
+CLAUDE.md

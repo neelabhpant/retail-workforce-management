@@ -1,20 +1,44 @@
-import React, { useState, useEffect } from 'react';
-import { Zap, Database, Brain, BarChart3, Users, Calendar, BookOpen } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Zap, Database, Brain, BarChart3, Users, Calendar, BookOpen, Heart, TrendingUp } from 'lucide-react';
+import LandingSequence from './components/LandingSequence';
 import DataFlowVisualizer from './components/DataFlowVisualizer';
+import DataLineageTracker from './components/DataLineageTracker';
 import SchedulingDashboard from './components/SchedulingDashboard';
 import RetentionAnalytics from './components/RetentionAnalytics';
 import LearningPathway from './components/LearningPathway';
 import PlatformMetrics from './components/PlatformMetrics';
+import SentimentDashboard from './components/SentimentDashboard';
+import ExecutiveSummary from './components/ExecutiveSummary';
+import MobileSentimentDashboard from './components/mobile/MobileSentimentDashboard';
 import { api, wsManager, PlatformStatus } from './services/api';
 
-type TabType = 'overview' | 'scheduling' | 'retention' | 'learning';
+const isMobileRoute = window.location.pathname === '/mobile';
+
+type TabType = 'overview' | 'executive' | 'sentiment' | 'scheduling' | 'retention' | 'learning';
+
+const LANDING_STORAGE_KEY = 'landing_sequence_shown';
 
 function App() {
+  const [showLanding, setShowLanding] = useState(() => {
+    if (isMobileRoute) return false;
+    return sessionStorage.getItem(LANDING_STORAGE_KEY) !== 'true';
+  });
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+
+  const handleLandingComplete = useCallback(() => {
+    sessionStorage.setItem(LANDING_STORAGE_KEY, 'true');
+    setShowLanding(false);
+  }, []);
   const [platformStatus, setPlatformStatus] = useState<PlatformStatus | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+  const [trackingData, setTrackingData] = useState<any>(null);
+  const [currentStage, setCurrentStage] = useState<string>('');
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [animationSpeed, setAnimationSpeed] = useState(1);
 
   useEffect(() => {
+    if (isMobileRoute) return;
     // Initialize WebSocket connection
     wsManager.connect();
     
@@ -38,13 +62,111 @@ function App() {
 
     fetchStatus();
 
+    // Listen for lineage tracking updates
+    wsManager.on('lineage_tracking', (data: any) => {
+      setTrackingData(data);
+      if (data.stages && data.stages.length > 0) {
+        animateDataJourney(data.stages);
+      }
+    });
+
     return () => {
       wsManager.disconnect();
     };
   }, []);
 
+  // Lineage tracking handlers
+  const handleTrackData = async (dataType: string, dataId: string) => {
+    try {
+      setIsTracking(true);
+      setElapsedTime(0);
+      setCurrentStage('Initializing...');
+      
+      const response = await fetch('http://localhost:8000/api/lineage/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data_type: dataType, data_id: dataId })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        setTrackingData(data);
+        animateDataJourney(data.stages);
+      }
+    } catch (error) {
+      console.error('Failed to track data:', error);
+      setIsTracking(false);
+    }
+  };
+
+  const animateDataJourney = (stages: any[]) => {
+    let currentIndex = 0;
+    let currentTime = 0;
+    
+    const animateStage = () => {
+      if (currentIndex < stages.length) {
+        const stage = stages[currentIndex];
+        setCurrentStage(stage.component);
+        
+        // Simulate progress through the stage
+        const duration = stage.duration / animationSpeed;
+        const steps = 10;
+        const stepDuration = duration / steps;
+        let step = 0;
+        
+        const progressInterval = setInterval(() => {
+          step++;
+          currentTime += stepDuration;
+          setElapsedTime(Math.round(currentTime));
+          
+          if (step >= steps) {
+            clearInterval(progressInterval);
+            currentIndex++;
+            if (currentIndex < stages.length) {
+              setTimeout(animateStage, 100 / animationSpeed);
+            } else {
+              setCurrentStage('Complete');
+              setTimeout(() => {
+                setIsTracking(false);
+              }, 2000);
+            }
+          }
+        }, stepDuration);
+      }
+    };
+    
+    animateStage();
+  };
+
+  const handleSpeedChange = (speed: number) => {
+    setAnimationSpeed(speed);
+  };
+
+  const handlePause = () => {
+    // Pause animation logic
+    setAnimationSpeed(0);
+  };
+
+  const handleReset = () => {
+    setIsTracking(false);
+    setTrackingData(null);
+    setCurrentStage('');
+    setElapsedTime(0);
+    setAnimationSpeed(1);
+  };
+
+  if (isMobileRoute) {
+    return <MobileSentimentDashboard />;
+  }
+
+  if (showLanding) {
+    return <LandingSequence onComplete={handleLandingComplete} />;
+  }
+
   const tabs = [
     { id: 'overview', label: 'CDP Overview', icon: Database },
+    { id: 'executive', label: 'Executive Summary', icon: TrendingUp },
+    { id: 'sentiment', label: 'Sentiment Analysis', icon: Heart },
     { id: 'scheduling', label: 'Smart Scheduling', icon: Calendar },
     { id: 'retention', label: 'Retention Analytics', icon: Users },
     { id: 'learning', label: 'Learning Paths', icon: BookOpen },
@@ -53,18 +175,11 @@ function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
-        return (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <DataFlowVisualizer />
-              </div>
-              <div>
-                <PlatformMetrics status={platformStatus} isConnected={isConnected} />
-              </div>
-            </div>
-          </div>
-        );
+        return <DataFlowVisualizer />;
+      case 'executive':
+        return <ExecutiveSummary />;
+      case 'sentiment':
+        return <SentimentDashboard />;
       case 'scheduling':
         return <SchedulingDashboard />;
       case 'retention':
@@ -89,7 +204,7 @@ function App() {
                   <h1 className="text-xl font-bold text-gray-900">
                     Cloudera Data Platform
                   </h1>
-                  <p className="text-sm text-gray-500">Retail Workforce Management Demo</p>
+                  <p className="text-sm text-gray-500">Retail Workforce Management System</p>
                 </div>
               </div>
             </div>
@@ -161,7 +276,7 @@ function App() {
               </div>
             </div>
             <div className="text-sm text-gray-500">
-              Demo Environment • Real-time Analytics
+              Real-time Analytics
             </div>
           </div>
         </div>

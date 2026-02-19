@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, 
   TrendingDown, 
@@ -11,7 +11,14 @@ import {
   Download,
   Eye,
   CheckCircle,
-  XCircle
+  XCircle,
+  AlertTriangle,
+  TrendingUp,
+  DollarSign,
+  Brain,
+  Clock,
+  RefreshCw,
+  Lightbulb
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar } from 'recharts';
 import { api, RetentionAnalysis, RetentionMetric } from '../services/api';
@@ -25,7 +32,38 @@ interface EmployeeRisk {
   risk_factors: string[];
   interventions: string[];
   predicted_outcome?: number;
+  satisfaction_score?: number;
+  performance_score?: number;
+  sentiment_trend?: string;
 }
+
+interface RetentionAgentProgress {
+  name: string;
+  displayName: string;
+  icon: 'AlertTriangle' | 'Heart' | 'TrendingUp' | 'DollarSign' | 'Brain';
+  status: 'waiting' | 'working' | 'completed';
+  workingStatus: string;
+  doneStatus: string;
+}
+
+const retentionFacts = [
+  "AI analyzes 30+ behavioral signals per employee",
+  "Early intervention reduces turnover by up to 40%",
+  "Sentiment analysis processes feedback in real-time",
+  "Career path modeling considers 100+ growth trajectories",
+  "Compensation analysis benchmarks against 500+ market data points",
+  "Engagement scores correlate 85% with retention outcomes",
+  "Personalized interventions improve success rates by 3x",
+  "Predictive models achieve 92% accuracy on 90-day retention"
+];
+
+const initialAgentProgress: RetentionAgentProgress[] = [
+  { name: 'risk_analyst', displayName: 'Retention Risk Analyst', icon: 'AlertTriangle', status: 'waiting', workingStatus: 'Scanning behavioral patterns across employees...', doneStatus: 'Identified high-risk employees' },
+  { name: 'engagement_specialist', displayName: 'Employee Engagement Specialist', icon: 'Heart', status: 'waiting', workingStatus: 'Analyzing satisfaction metrics and engagement scores...', doneStatus: 'Engagement analysis complete' },
+  { name: 'career_strategist', displayName: 'Career Development Strategist', icon: 'TrendingUp', status: 'waiting', workingStatus: 'Evaluating growth opportunities and career paths...', doneStatus: 'Career path analysis complete' },
+  { name: 'compensation_analyst', displayName: 'Compensation & Benefits Analyst', icon: 'DollarSign', status: 'waiting', workingStatus: 'Comparing compensation to market benchmarks...', doneStatus: 'Compensation gaps identified' },
+  { name: 'chief_strategist', displayName: 'Chief Retention Strategist', icon: 'Brain', status: 'waiting', workingStatus: 'Synthesizing retention strategies and interventions...', doneStatus: 'Personalized interventions generated' },
+];
 
 const RetentionAnalytics: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -35,10 +73,108 @@ const RetentionAnalytics: React.FC = () => {
   const [filterDepartment, setFilterDepartment] = useState<string>('all');
   const [filterRiskLevel, setFilterRiskLevel] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [currentFactIndex, setCurrentFactIndex] = useState(0);
+  const [agentProgress, setAgentProgress] = useState<RetentionAgentProgress[]>(initialAgentProgress);
+  const [showingAgentProgress, setShowingAgentProgress] = useState(false);
+  const [pendingResult, setPendingResult] = useState<RetentionAnalysis | null>(null);
+  const [animationComplete, setAnimationComplete] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const factTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const agentTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isAnimationRunningRef = useRef(false);
 
   useEffect(() => {
     loadRetentionMetrics();
   }, []);
+
+  useEffect(() => {
+    if (showingAgentProgress) {
+      setElapsedTime(0);
+      timerRef.current = setInterval(() => {
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+      
+      factTimerRef.current = setInterval(() => {
+        setCurrentFactIndex(prev => (prev + 1) % retentionFacts.length);
+      }, 4000);
+      
+      return () => {
+        if (timerRef.current) clearInterval(timerRef.current);
+        if (factTimerRef.current) clearInterval(factTimerRef.current);
+      };
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (factTimerRef.current) clearInterval(factTimerRef.current);
+    }
+  }, [showingAgentProgress]);
+
+  useEffect(() => {
+    if (showingAgentProgress && !isAnimationRunningRef.current) {
+      isAnimationRunningRef.current = true;
+      setAnimationComplete(false);
+      setAgentProgress(initialAgentProgress.map(a => ({ ...a, status: 'waiting' as const })));
+      let currentAgentIndex = 0;
+      
+      const runAgentSequence = () => {
+        if (currentAgentIndex < 5) {
+          setAgentProgress(prev => prev.map((agent, idx) => {
+            if (idx < currentAgentIndex) {
+              return { ...agent, status: 'completed' };
+            }
+            if (idx === currentAgentIndex) {
+              return { ...agent, status: 'working' };
+            }
+            return { ...agent, status: 'waiting' };
+          }));
+          
+          const workingTime = 3000 + Math.random() * 2000;
+          agentTimerRef.current = setTimeout(() => {
+            setAgentProgress(prev => prev.map((agent, idx) => {
+              if (idx <= currentAgentIndex) {
+                return { ...agent, status: 'completed' };
+              }
+              return agent;
+            }));
+            
+            currentAgentIndex++;
+            
+            if (currentAgentIndex < 5) {
+              agentTimerRef.current = setTimeout(runAgentSequence, 500);
+            } else {
+              agentTimerRef.current = setTimeout(() => {
+                isAnimationRunningRef.current = false;
+                setAnimationComplete(true);
+              }, 1000);
+            }
+          }, workingTime);
+        }
+      };
+      
+      agentTimerRef.current = setTimeout(runAgentSequence, 500);
+    }
+    
+    return () => {
+      if (agentTimerRef.current && !showingAgentProgress) {
+        clearTimeout(agentTimerRef.current);
+        isAnimationRunningRef.current = false;
+      }
+    };
+  }, [showingAgentProgress]);
+
+  useEffect(() => {
+    if (animationComplete && pendingResult) {
+      setRetentionAnalysis(pendingResult);
+      setPendingResult(null);
+      setAnimationComplete(false);
+      setIsFinalizing(false);
+      setShowingAgentProgress(false);
+      setIsAnalyzing(false);
+    } else if (animationComplete && !pendingResult) {
+      setIsFinalizing(true);
+    }
+  }, [animationComplete, pendingResult]);
 
   const loadRetentionMetrics = async () => {
     try {
@@ -51,6 +187,10 @@ const RetentionAnalytics: React.FC = () => {
 
   const runRetentionAnalysis = async () => {
     setIsAnalyzing(true);
+    setShowingAgentProgress(true);
+    setPendingResult(null);
+    setAnimationComplete(false);
+    setIsFinalizing(false);
     
     try {
       const response = await api.analyzeRetention({
@@ -58,11 +198,11 @@ const RetentionAnalytics: React.FC = () => {
       });
       
       if (response.success) {
-        setRetentionAnalysis(response.data);
+        setPendingResult(response.data);
       }
     } catch (error) {
       console.error('Retention analysis failed:', error);
-    } finally {
+      setShowingAgentProgress(false);
       setIsAnalyzing(false);
     }
   };
@@ -71,6 +211,23 @@ const RetentionAnalytics: React.FC = () => {
     if (score >= 0.7) return { level: 'High', color: 'text-red-600', bgColor: 'bg-red-100' };
     if (score >= 0.4) return { level: 'Medium', color: 'text-yellow-600', bgColor: 'bg-yellow-100' };
     return { level: 'Low', color: 'text-green-600', bgColor: 'bg-green-100' };
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getAgentIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'AlertTriangle': return AlertTriangle;
+      case 'Heart': return Heart;
+      case 'TrendingUp': return TrendingUp;
+      case 'DollarSign': return DollarSign;
+      case 'Brain': return Brain;
+      default: return AlertTriangle;
+    }
   };
 
   const departments = Array.from(new Set(rawMetrics.map(m => m.department).filter(Boolean)));
@@ -99,12 +256,14 @@ const RetentionAnalytics: React.FC = () => {
     employees: retentionAnalysis.employees.filter(e => e.department === dept).length
   })) : [];
 
-  const scatterData = filteredEmployees.map(emp => ({
-    tenure: emp.tenure_months,
-    risk: emp.risk_score,
-    name: emp.name,
-    department: emp.department
-  }));
+  const scatterData = filteredEmployees
+    .map(emp => ({
+      tenure: emp.tenure_months,
+      risk: emp.risk_score,
+      name: emp.name,
+      department: emp.department
+    }))
+    .sort((a, b) => a.tenure - b.tenure);
 
   return (
     <div className="space-y-6">
@@ -200,6 +359,26 @@ const RetentionAnalytics: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           className="space-y-6"
         >
+          {/* Top Risk Factors Summary */}
+          {retentionAnalysis.summary.top_risk_factors && retentionAnalysis.summary.top_risk_factors.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center">
+                <AlertCircle className="h-5 w-5 mr-2 text-red-600" />
+                Top Risk Factors
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {retentionAnalysis.summary.top_risk_factors.map((factor, index) => (
+                  <div key={index} className="flex items-start space-x-3 p-3 bg-red-50 rounded-lg">
+                    <div className="flex-shrink-0 mt-1">
+                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                    </div>
+                    <span className="text-sm text-red-800 font-medium">{factor}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Risk Distribution and Department Trends */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Risk Distribution Pie Chart */}
@@ -344,6 +523,35 @@ const RetentionAnalytics: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                    
+                    {/* Sentiment Indicator */}
+                    {employee.satisfaction_score && (
+                      <div className="mb-3 p-2 bg-gray-50 rounded-md">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-600">Sentiment</span>
+                          <div className="flex items-center space-x-1">
+                            <Heart className={`h-3 w-3 ${
+                              employee.satisfaction_score > 3.5 ? 'text-green-500' :
+                              employee.satisfaction_score > 2.5 ? 'text-yellow-500' : 'text-red-500'
+                            }`} />
+                            <span className="font-medium">
+                              {employee.satisfaction_score.toFixed(1)}/5
+                            </span>
+                          </div>
+                        </div>
+                        {employee.sentiment_trend && (
+                          <div className="flex items-center justify-between text-xs mt-1">
+                            <span className="text-gray-600">Trend</span>
+                            <span className={`font-medium ${
+                              employee.sentiment_trend === 'improving' ? 'text-green-600' :
+                              employee.sentiment_trend === 'declining' ? 'text-red-600' : 'text-gray-600'
+                            }`}>
+                              {employee.sentiment_trend}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Risk Score Bar */}
                     <div className="mb-3">
@@ -395,10 +603,10 @@ const RetentionAnalytics: React.FC = () => {
             <h2 className="text-xl font-semibold mb-4">Tenure vs Risk Analysis</h2>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart data={scatterData}>
+                <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="tenure" name="Tenure (months)" />
-                  <YAxis dataKey="risk" name="Risk Score" domain={[0, 1]} tickFormatter={(value) => `${(value * 100).toFixed(0)}%`} />
+                  <XAxis type="number" dataKey="tenure" name="Tenure (months)" domain={[0, 'dataMax']} />
+                  <YAxis type="number" dataKey="risk" name="Risk Score" domain={[0, 1]} tickFormatter={(value) => `${(value * 100).toFixed(0)}%`} />
                   <Tooltip 
                     formatter={(value: any, name: string) => [
                       name === 'risk' ? `${(value * 100).toFixed(1)}%` : `${value} months`,
@@ -406,7 +614,7 @@ const RetentionAnalytics: React.FC = () => {
                     ]}
                     labelFormatter={(label, payload) => payload?.[0]?.payload?.name || ''}
                   />
-                  <Scatter dataKey="risk" fill="#8884d8" />
+                  <Scatter data={scatterData} fill="#8884d8" />
                 </ScatterChart>
               </ResponsiveContainer>
             </div>
@@ -519,20 +727,169 @@ const RetentionAnalytics: React.FC = () => {
         </motion.div>
       )}
 
-      {/* Loading State */}
-      {isAnalyzing && (
+      {/* AI Agent Progress Panel */}
+      {showingAgentProgress && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-xl shadow-2xl border border-slate-700 overflow-hidden"
         >
-          <div className="flex flex-col items-center space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cdp-blue"></div>
-            <h3 className="text-lg font-medium text-gray-900">Analyzing Employee Retention</h3>
-            <p className="text-gray-600 max-w-md">
-              AI agents are analyzing employee data, performance metrics, and behavioral patterns 
-              to identify retention risks and generate personalized intervention strategies.
-            </p>
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-slate-700">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                  className="p-2 bg-purple-500/20 rounded-lg"
+                >
+                  <Brain className="h-6 w-6 text-purple-400" />
+                </motion.div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">AI Retention Analysis in Progress</h3>
+                  <p className="text-slate-400 text-sm">5 specialized agents analyzing employee data</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-2xl font-mono font-bold text-white">{formatTime(elapsedTime)}</div>
+                <div className="text-slate-400 text-xs">elapsed</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Progress Bar */}
+          <div className="px-6 py-4 border-b border-slate-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-slate-400">Overall Progress</span>
+              <span className="text-sm font-medium text-white">
+                {agentProgress.filter(a => a.status === 'completed').length} of 5 agents complete
+              </span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-3">
+              <motion.div
+                className="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${(agentProgress.filter(a => a.status === 'completed').length / 5) * 100}%` }}
+                transition={{ duration: 0.5 }}
+              />
+            </div>
+          </div>
+          
+          {/* Finalizing Banner */}
+          {isFinalizing && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="px-6 py-4 bg-amber-500/10 border-b border-amber-500/30"
+            >
+              <div className="flex items-center space-x-3">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                >
+                  <RefreshCw className="h-5 w-5 text-amber-400" />
+                </motion.div>
+                <div>
+                  <div className="text-amber-400 font-medium">Finalizing results...</div>
+                  <div className="text-amber-400/70 text-sm">AI agents are compiling the retention analysis</div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+          
+          {/* Agent Status List */}
+          <div className="px-6 py-4">
+            <div className="space-y-3">
+              {agentProgress.map((agent, index) => {
+                const IconComponent = getAgentIcon(agent.icon);
+                const statusText = agent.status === 'completed' ? agent.doneStatus : 
+                                   agent.status === 'working' ? agent.workingStatus : 
+                                   'Waiting to start...';
+                return (
+                  <motion.div
+                    key={agent.name}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className={`flex items-center space-x-3 p-3 rounded-lg ${
+                      agent.status === 'completed' ? 'bg-emerald-500/10 border border-emerald-500/30' :
+                      agent.status === 'working' ? 'bg-blue-500/10 border border-blue-500/30' :
+                      'bg-slate-800 border border-slate-700'
+                    }`}
+                  >
+                    <div className="flex-shrink-0">
+                      {agent.status === 'completed' ? (
+                        <CheckCircle className="h-5 w-5 text-emerald-400" />
+                      ) : agent.status === 'working' ? (
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        >
+                          <RefreshCw className="h-5 w-5 text-blue-400" />
+                        </motion.div>
+                      ) : (
+                        <Clock className="h-5 w-5 text-slate-500" />
+                      )}
+                    </div>
+                    <div className="flex-shrink-0">
+                      <IconComponent className={`h-5 w-5 ${
+                        agent.status === 'completed' ? 'text-emerald-400' :
+                        agent.status === 'working' ? 'text-blue-400' :
+                        'text-slate-500'
+                      }`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className={`font-medium ${
+                        agent.status === 'completed' ? 'text-emerald-400' :
+                        agent.status === 'working' ? 'text-blue-400' :
+                        'text-slate-400'
+                      }`}>
+                        {agent.displayName}
+                      </div>
+                      <div className="text-sm text-slate-500 truncate">{statusText}</div>
+                    </div>
+                    <div className={`text-xs font-medium px-2 py-1 rounded ${
+                      agent.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                      agent.status === 'working' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-slate-700 text-slate-500'
+                    }`}>
+                      {agent.status === 'completed' ? 'Done' :
+                       agent.status === 'working' ? 'Working...' :
+                       'Waiting'}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+          
+          {/* Did You Know Fact */}
+          <div className="px-6 py-4 border-t border-slate-700 bg-slate-800/50">
+            <div className="flex items-start space-x-3">
+              <Lightbulb className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Did you know?</div>
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentFactIndex}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="text-sm text-slate-300"
+                  >
+                    {retentionFacts[currentFactIndex]}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            </div>
+          </div>
+          
+          {/* Footer */}
+          <div className="px-6 py-3 border-t border-slate-700 bg-slate-900/50">
+            <div className="flex items-center justify-center space-x-2 text-xs text-slate-500">
+              <span>Powered by</span>
+              <span className="font-semibold text-slate-400">Cloudera Data Platform</span>
+            </div>
           </div>
         </motion.div>
       )}
