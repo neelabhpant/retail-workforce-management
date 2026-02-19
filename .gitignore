@@ -91,8 +91,6 @@ coverage/
 *.key
 *.crt
 
-# Sharables directory
-sharables/
 
 
 # Architecture images
