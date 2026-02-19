@@ -109,6 +109,11 @@ HOW_TO_USE_UI_FEATURES.md
 Project_Overview.md
 SERVICES_ARCHITECTURE.md
 project_description.md
+backend/BACKEND_ROADMAP.md
+backend/BACKEND_STRUCTURE.md
+backend/requirements_docker.txt
+backend/requirements_simple.txt
+backend/test_websocket.html
 
 # Claude
 .claude/
