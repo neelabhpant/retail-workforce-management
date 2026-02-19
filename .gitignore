@@ -94,10 +94,6 @@ coverage/
 # Sharables directory
 sharables/
 
-# Demo scripts (optional docs)
-demo_scripts/
-demo_script.md
-demo_script_learning_path.md
 
 # Architecture images
 *.png
