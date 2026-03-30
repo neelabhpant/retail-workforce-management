@@ -107,7 +107,7 @@ const SchedulingDashboard: React.FC = () => {
   useEffect(() => {
     if (isOptimizing && useCrewAI) {
       // Setup WebSocket connection for real-time updates
-      const wsUrl = `ws://localhost:8000/ws`;
+      const wsUrl = `ws://localhost:8002/ws`;
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

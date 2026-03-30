@@ -82,7 +82,7 @@ function App() {
       setElapsedTime(0);
       setCurrentStage('Initializing...');
       
-      const response = await fetch('http://localhost:8000/api/lineage/track', {
+      const response = await fetch('http://localhost:8002/api/lineage/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data_type: dataType, data_id: dataId })

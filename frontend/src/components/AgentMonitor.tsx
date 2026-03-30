@@ -107,7 +107,7 @@ const AgentMonitor: React.FC<AgentMonitorProps> = ({ isActive, onAgentUpdate }) 
 
     // Connect to WebSocket for agent updates
     const connectWebSocket = () => {
-      const wsUrl = 'ws://localhost:8000/ws';
+      const wsUrl = 'ws://localhost:8002/ws';
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {

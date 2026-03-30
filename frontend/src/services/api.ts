@@ -1,7 +1,7 @@
 import axios from 'axios';
 // Removed socket.io-client import - using native WebSocket
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8002';
 
 // API Client for regular requests
 const apiClient = axios.create({
